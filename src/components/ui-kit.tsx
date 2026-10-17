@@ -26,7 +26,7 @@ export function Panel({ title, note, children, className, actions }: { title?: s
           {actions}
         </header>
       )}
-      <div className="p-4">{children}</div>
+      <div className="overflow-x-auto p-4">{children}</div>
     </section>
   );
 }
