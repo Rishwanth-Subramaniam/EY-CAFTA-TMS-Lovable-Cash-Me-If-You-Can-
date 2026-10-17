@@ -49,7 +49,7 @@ function Overview() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis dataKey="ccy" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number) => `₹${v.toLocaleString("en-US")} million`} />
+                <Tooltip formatter={(v) => `₹${Number(v).toLocaleString("en-US")} million`} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Bar dataKey="Cash" fill="var(--color-chart-2)" />
                 <Bar dataKey="Debt" fill="var(--color-chart-1)" />
@@ -81,7 +81,7 @@ function Overview() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis dataKey="week" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number) => `₹${v.toLocaleString("en-US")} million`} />
+                <Tooltip formatter={(v) => `₹${Number(v).toLocaleString("en-US")} million`} />
                 <Area dataKey="Closing" stroke="var(--color-chart-1)" fill="var(--color-chart-2)" fillOpacity={0.35} />
                 <Area dataKey="Outflows" stroke="var(--color-chart-5)" fill="transparent" />
               </AreaChart>
