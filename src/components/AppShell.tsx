@@ -47,7 +47,7 @@ export function AppShell() {
           GCPL is fictional. All records are illustrative/simulated. Not an official EY product. No live bank, TMS, ERP or SWIFT connection.
         </div>
       </aside>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-x-hidden">
         <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-card px-6 py-2.5">
           <nav className="flex gap-1 overflow-x-auto md:hidden">
             {NAV.map((n, i) => (

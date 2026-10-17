@@ -62,7 +62,7 @@ function Pools() {
         </div>
       </Panel>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_440px]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
         <Panel title="Transaction work queue" actions={<Select label="Show" value={filter} onChange={setFilter} options={[{ value: "ALL", label: "All" }, { value: "OPEN", label: "In progress" }, { value: "BLOCKED", label: "Blocked / failed" }, { value: "DONE", label: "Executed / reconciled" }]} />}>
           <div className="max-h-[560px] overflow-auto">
             <table className="data-table">
@@ -82,7 +82,7 @@ function Pools() {
           </div>
         </Panel>
 
-        <Panel title={t ? `${t.transaction_id} · ${t.transaction_type}` : "Select a transaction"} note={t ? `Created ${t.created_timestamp_demo ?? t.created_at_demo}` : "Proposals from Screen 2 open here automatically."}>
+        <Panel className="min-w-0" title={t ? `${t.transaction_id} · ${t.transaction_type}` : "Select a transaction"} note={t ? `Created ${t.created_timestamp_demo ?? t.created_at_demo}` : "Proposals from Screen 2 open here automatically."}>
           {t ? (
             <div className="space-y-4 text-xs">
               <ol className="flex flex-wrap gap-1">

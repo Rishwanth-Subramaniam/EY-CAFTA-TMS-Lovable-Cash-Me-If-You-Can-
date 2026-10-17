@@ -48,7 +48,7 @@ function Policies() {
         </div>
       </Panel>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="mt-4 grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <Panel title="Policy library" note="Read-only">
           <ul className="space-y-1 text-xs">
             {policies.map((x) => (

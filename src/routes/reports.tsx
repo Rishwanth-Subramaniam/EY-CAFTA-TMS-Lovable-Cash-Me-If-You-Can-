@@ -79,7 +79,7 @@ function Reports() {
                 <XAxis dataKey="k" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip formatter={(v) => `₹${Number(v).toFixed(1)} million`} />
-                <Bar dataKey="v" fill="var(--color-chart-1)" />
+                <Bar isAnimationActive={false} dataKey="v" fill="var(--color-chart-1)" />
               </BarChart>
             </ResponsiveContainer>
           </div>

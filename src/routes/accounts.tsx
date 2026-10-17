@@ -55,7 +55,7 @@ function Accounts() {
         </Panel>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_400px]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
         <Panel title={`Account inventory · ${rows.length} shown`} actions={<div className="flex flex-wrap gap-2"><Select label="Rec." value={rec} onChange={setRec} options={opts(recCounts.map((r) => r.r))} /><Select label="Bank" value={bank} onChange={setBank} options={[{ value: "ALL", label: "All" }, ...[...new Set(accounts.map((x) => x.bank_id))].map((b) => ({ value: b, label: bankName(b).split(" —")[0] }))]} /><Select label="Country" value={country} onChange={setCountry} options={opts([...new Set(accounts.map((x) => x.country))].sort())} /></div>}>
           <div className="max-h-[600px] overflow-auto">
             <table className="data-table">

@@ -76,7 +76,7 @@ function Cash() {
         <Select label="Currency group" value={ccy} onChange={setCcy} options={[{ value: "ALL", label: "All groups (separated)" }, ...ccys.map((c) => ({ value: c, label: c }))]} />
       </PageHeader>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">
           {groups.map((g) => {
             const gr = rows.filter((r) => r.currency === g);
