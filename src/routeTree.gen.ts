@@ -10,12 +10,27 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AccountsRouteImport } from './routes/accounts'
+import { Route as BankingRouteImport } from './routes/banking'
 import { Route as CashRouteImport } from './routes/cash'
+import { Route as PoliciesRouteImport } from './routes/policies'
 import { Route as PoolsRouteImport } from './routes/pools'
+import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as RiskRouteImport } from './routes/risk'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountsRoute = AccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BankingRoute = BankingRouteImport.update({
+  id: '/banking',
+  path: '/banking',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CashRoute = CashRouteImport.update({
@@ -23,40 +38,100 @@ const CashRoute = CashRouteImport.update({
   path: '/cash',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PoliciesRoute = PoliciesRouteImport.update({
+  id: '/policies',
+  path: '/policies',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PoolsRoute = PoolsRouteImport.update({
   id: '/pools',
   path: '/pools',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RiskRoute = RiskRouteImport.update({
+  id: '/risk',
+  path: '/risk',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
+  '/banking': typeof BankingRoute
   '/cash': typeof CashRoute
+  '/policies': typeof PoliciesRoute
   '/pools': typeof PoolsRoute
+  '/reports': typeof ReportsRoute
+  '/risk': typeof RiskRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
+  '/banking': typeof BankingRoute
   '/cash': typeof CashRoute
+  '/policies': typeof PoliciesRoute
   '/pools': typeof PoolsRoute
+  '/reports': typeof ReportsRoute
+  '/risk': typeof RiskRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
+  '/banking': typeof BankingRoute
   '/cash': typeof CashRoute
+  '/policies': typeof PoliciesRoute
   '/pools': typeof PoolsRoute
+  '/reports': typeof ReportsRoute
+  '/risk': typeof RiskRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/cash' | '/pools'
+  fullPaths:
+    | '/'
+    | '/accounts'
+    | '/banking'
+    | '/cash'
+    | '/policies'
+    | '/pools'
+    | '/reports'
+    | '/risk'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/cash' | '/pools'
-  id: '__root__' | '/' | '/cash' | '/pools'
+  to:
+    | '/'
+    | '/accounts'
+    | '/banking'
+    | '/cash'
+    | '/policies'
+    | '/pools'
+    | '/reports'
+    | '/risk'
+  id:
+    | '__root__'
+    | '/'
+    | '/accounts'
+    | '/banking'
+    | '/cash'
+    | '/policies'
+    | '/pools'
+    | '/reports'
+    | '/risk'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountsRoute: typeof AccountsRoute
+  BankingRoute: typeof BankingRoute
   CashRoute: typeof CashRoute
+  PoliciesRoute: typeof PoliciesRoute
   PoolsRoute: typeof PoolsRoute
+  ReportsRoute: typeof ReportsRoute
+  RiskRoute: typeof RiskRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -68,11 +143,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/accounts': {
+      id: '/accounts'
+      path: '/accounts'
+      fullPath: '/accounts'
+      preLoaderRoute: typeof AccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/banking': {
+      id: '/banking'
+      path: '/banking'
+      fullPath: '/banking'
+      preLoaderRoute: typeof BankingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cash': {
       id: '/cash'
       path: '/cash'
       fullPath: '/cash'
       preLoaderRoute: typeof CashRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/policies': {
+      id: '/policies'
+      path: '/policies'
+      fullPath: '/policies'
+      preLoaderRoute: typeof PoliciesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pools': {
@@ -82,13 +178,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PoolsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/risk': {
+      id: '/risk'
+      path: '/risk'
+      fullPath: '/risk'
+      preLoaderRoute: typeof RiskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountsRoute: AccountsRoute,
+  BankingRoute: BankingRoute,
   CashRoute: CashRoute,
+  PoliciesRoute: PoliciesRoute,
   PoolsRoute: PoolsRoute,
+  ReportsRoute: ReportsRoute,
+  RiskRoute: RiskRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
