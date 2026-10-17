@@ -42,7 +42,7 @@ function Pools() {
   const runValidation = () => {
     if (!t) return;
     const v = validate(t);
-    dispatch({ type: "status", id: t.transaction_id, status: v.ok ? "Validated (simulated)" : "Blocked by policy", actor: "System rule engine", reason: v.ok ? "Same-currency, pool eligibility, cadence and restriction checks passed (simulated)." : v.reasons.join(" "), policy: v.ok ? "POL-POOL-01" : "POL-ISL-01" });
+    dispatch({ type: "status", id: t.transaction_id, status: v.ok ? "Validated (simulated)" : "Blocked by policy", actor: "System rule engine", reason: v.ok ? "Same-currency, pool eligibility, cadence and restriction checks passed (simulated)." : v.reasons.join(" "), policy: v.ok ? "POL-POOL-01" : "POL-POOL-01;POL-IN-01" });
   };
 
   return (
