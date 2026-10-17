@@ -90,7 +90,7 @@ function reducer(s: State, a: Action): State {
   });
   switch (a.type) {
     case "create": {
-      const t = { ...a.txn, transaction_id: `TRX-${s.seq}`, status: "Draft (simulated)", created_timestamp_demo: now() };
+      const t: Txn = { ...a.txn, transaction_id: `TRX-${s.seq}`, status: "Draft (simulated)", created_timestamp_demo: now() };
       return {
         ...s,
         seq: s.seq + 1,
