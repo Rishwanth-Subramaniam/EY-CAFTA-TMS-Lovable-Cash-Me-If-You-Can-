@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { PageHeader, Panel, Status, Metric, Btn, Select, Note } from "@/components/ui-kit";
 import { entityName, fmtInr, fmtNative, toInr, policies } from "@/lib/data";
-import { useStore, requiredControls } from "@/lib/store";
+import { useStore } from "@/lib/store";
 
 export const Route = createFileRoute("/risk")({
   head: () => ({
@@ -25,16 +25,24 @@ function Risk() {
   const [entityFilter, setEntityFilter] = useState("ALL");
   const [currencyFilter, setCurrencyFilter] = useState("ALL");
   const [ownerFilter, setOwnerFilter] = useState("ALL");
-  const payments = state.txns.filter((t) => /payment/i.test(t.transaction_type));
   const blocked = state.txns.filter((t) => /blocked/i.test(t.status));
-  const exc = state.exceptions.filter((e) => sev === "ALL" || e.severity === sev);
-  const open = state.exceptions.filter((e) => !/resolved/i.test(e.status_demo));
+  const paymentTransactionIds = new Set(
+    state.txns.filter((t) => /payment/i.test(t.transaction_type)).map((t) => t.transaction_id),
+  );
+  const exc = state.exceptions.filter(
+    (e) =>
+      !paymentTransactionIds.has(e.linked_transaction_id) &&
+      !/payment/i.test(e.exception_type) &&
+      (sev === "ALL" || e.severity === sev),
+  );
+  const open = exc.filter((e) => !/resolved/i.test(e.status_demo));
 
   const approvalRows = useMemo(() => {
-    return state.approvals.map((a) => {
+    return state.approvals.flatMap((a) => {
       const txn = state.txns.find((t) => t.transaction_id === a.transaction_id);
+      if ((txn && /payment/i.test(txn.transaction_type)) || /payment/i.test(a.approval_type)) return [];
       const status = a.status_demo || "Pending";
-      return {
+      return [{
         ...a,
         txn,
         entity: txn ? entityName(txn.from_entity_id) : "—",
@@ -44,7 +52,7 @@ function Risk() {
         status,
         owner: a.approver_role,
         updated: a.timestamp_demo || "Pending",
-      };
+      }];
     });
   }, [state.approvals, state.txns]);
 
@@ -67,6 +75,7 @@ function Risk() {
     const matchesOwner = ownerFilter === "ALL" || row.owner === ownerFilter;
     return matchesQuickView && matchesStatus && matchesType && matchesEntity && matchesCurrency && matchesOwner;
   });
+  const auditRows = state.audit.filter((row) => !paymentTransactionIds.has(row.linked_object_id));
 
   return (
     <>
@@ -83,35 +92,6 @@ function Risk() {
           <div className="text-xs text-muted-foreground">Human review required before release</div>
         </div>
       </div>
-
-      <Panel className="mt-4" title="Payment-control compliance monitor" note="Each payment shows its required control set">
-        <table className="data-table">
-          <thead><tr><th>Payment</th><th>Amount</th><th>INR equiv.</th><th>Maker</th><th>Independent checker</th><th>Sanctions screening</th><th>Front-office approver</th><th>Status</th></tr></thead>
-          <tbody>
-            {payments.map((p) => {
-              const ap = state.approvals.filter((a) => a.transaction_id === p.transaction_id);
-              const roles = requiredControls(p);
-              const cell = (r: string, match: RegExp) => {
-                if (!roles.includes(r)) return <span className="text-muted-foreground">Not required (below threshold)</span>;
-                const a = ap.find((x) => match.test(`${x.approval_type} ${x.approver_role}`));
-                return <Status>{a?.status_demo ?? (r === "Maker" ? "Approved" : "Pending")}</Status>;
-              };
-              return (
-                <tr key={p.transaction_id}>
-                  <td><Link to="/pools" search={{ tx: p.transaction_id }} className="num underline">{p.transaction_id}</Link><div className="text-muted-foreground">{entityName(p.from_entity_id)}</div></td>
-                  <td className="num">{fmtNative(p.amount_native, p.currency)}</td>
-                  <td className="num">{fmtInr(toInr(p.amount_native, p.currency))}</td>
-                  <td>{cell("Maker", /maker|analyst/i)}</td>
-                  <td>{cell("Independent checker", /checker|manager/i)}</td>
-                  <td>{cell("Sanctions screening", /sanction|screen/i)}</td>
-                  <td>{cell("Front-office approver", /front/i)}</td>
-                  <td><Status>{p.status}</Status></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Panel>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Panel id="exceptions" title="Exceptions & investigation queue" actions={<Select label="Severity" value={sev} onChange={setSev} options={["ALL", "High", "Medium", "Low"].map((v) => ({ value: v, label: v }))} />}>
@@ -138,7 +118,7 @@ function Risk() {
             <thead><tr><th>Policy</th><th>Linked open items</th></tr></thead>
             <tbody>
               {policies.map((p) => {
-                const n = state.txns.filter((t) => String(t.policy_ids ?? "").includes(p.policy_id) && /blocked|pending|needs|validation|failed/i.test(t.status)).length;
+                const n = state.txns.filter((t) => !/payment/i.test(t.transaction_type) && String(t.policy_ids ?? "").includes(p.policy_id) && /blocked|pending|needs|validation|failed/i.test(t.status)).length;
                 return <tr key={p.policy_id}><td><Link to="/policies" className="underline">{p.policy_id}</Link> {p.policy_name}</td><td>{n ? <Status tone="warn">{n} open</Status> : <Status tone="ok">No open items</Status>}</td></tr>;
               })}
             </tbody>
@@ -196,7 +176,7 @@ function Risk() {
           <div className="max-h-96 overflow-auto">
             <table className="data-table">
               <thead><tr><th>Time</th><th>Object</th><th>Action</th><th>Actor</th><th>Change</th></tr></thead>
-              <tbody>{state.audit.map((a) => <tr key={a.audit_id + a.timestamp_demo}><td className="num whitespace-nowrap">{a.timestamp_demo}</td><td className="num">{a.linked_object_id}</td><td>{a.action}<div className="text-muted-foreground">{a.reason}</div></td><td>{a.actor_role_demo}</td><td>{a.old_state} → {a.new_state}</td></tr>)}</tbody>
+              <tbody>{auditRows.map((a) => <tr key={a.audit_id + a.timestamp_demo}><td className="num whitespace-nowrap">{a.timestamp_demo}</td><td className="num">{a.linked_object_id}</td><td>{a.action}<div className="text-muted-foreground">{a.reason}</div></td><td>{a.actor_role_demo}</td><td>{a.old_state} → {a.new_state}</td></tr>)}</tbody>
             </table>
           </div>
         </Panel>
