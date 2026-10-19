@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { PageHeader, Panel, Status, Metric, Btn, Select, Note } from "@/components/ui-kit";
-import { entityName, fmtInr, fmtNative, toInr, policies } from "@/lib/data";
+import { accounts, bankName, entityName, fmtInr, fmtNative, policyById, toInr } from "@/lib/data";
 import { useStore } from "@/lib/store";
 
 export const Route = createFileRoute("/risk")({
@@ -19,6 +19,7 @@ export const Route = createFileRoute("/risk")({
 function Risk() {
   const { state, dispatch } = useStore();
   const [sev, setSev] = useState("ALL");
+  const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
   const [quickView, setQuickView] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
@@ -36,6 +37,38 @@ function Risk() {
       (sev === "ALL" || e.severity === sev),
   );
   const open = exc.filter((e) => !/resolved/i.test(e.status_demo));
+  const selectedException =
+    exc.find((e) => e.exception_id === selectedExceptionId) ?? exc[0];
+  const selectedTransaction = state.txns.find(
+    (t) => t.transaction_id === selectedException?.linked_transaction_id,
+  );
+  const accountLabel = (accountId?: string) => {
+    if (!accountId) return "Not recorded";
+    const account = accounts.find((a) => a.account_id === accountId);
+    return account ? `${account.account_id} · ${bankName(account.bank_id)}` : accountId;
+  };
+  const transactionTypeLabel = (type?: string) => {
+    if (!type) return "Not recorded";
+    if (/sweep/i.test(type)) return "Sweep";
+    if (/transfer/i.test(type)) return "Transfer";
+    if (/intercompany loan/i.test(type)) return "Intercompany Loan";
+    return type;
+  };
+  const flagRiskExplanation = (exceptionType?: string) => {
+    if (/sweep failure/i.test(exceptionType ?? "")) {
+      return "The bank movement may not have completed before cut-off, so the recorded cash position could differ from the expected position. Confirm the bank response and statement before considering another action.";
+    }
+    if (/fx evidence/i.test(exceptionType ?? "")) {
+      return "Without quote and market-reference evidence, the price and fairness of the FX deal cannot be independently verified.";
+    }
+    if (/local island/i.test(exceptionType ?? "")) {
+      return "The proposed route may breach local-currency or cross-border restrictions; cash must remain within the permitted local route.";
+    }
+    if (/counterparty evidence/i.test(exceptionType ?? "")) {
+      return "Without current rating and concentration evidence, counterparty suitability and exposure limits cannot be confirmed.";
+    }
+    return "The control exception means the transaction should be checked against its supporting evidence and applicable policy before a decision is recorded.";
+  };
 
   const approvalRows = useMemo(() => {
     return state.approvals.flatMap((a) => {
@@ -94,10 +127,10 @@ function Risk() {
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel id="exceptions" title="Exceptions & investigation queue" actions={<Select label="Severity" value={sev} onChange={setSev} options={["ALL", "High", "Medium", "Low"].map((v) => ({ value: v, label: v }))} />}>
-          <ul className="space-y-2 text-xs">
+        <Panel id="exceptions" title="Flagged Transactions Queue" actions={<Select label="Severity" value={sev} onChange={setSev} options={["ALL", "High", "Medium", "Low"].map((v) => ({ value: v, label: v }))} />}>
+          <ul className="max-h-[36rem] space-y-2 overflow-auto text-xs">
             {exc.map((e) => (
-              <li key={e.exception_id} className="rounded-sm border border-border p-3">
+              <li key={e.exception_id} className={`rounded-sm border p-3 ${selectedException?.exception_id === e.exception_id ? "border-primary bg-accent" : "border-border"}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div><span className="num font-semibold">{e.exception_id}</span> · {e.exception_type} · <Status>{e.severity}</Status></div>
                   <Status>{e.status_demo}</Status>
@@ -105,6 +138,9 @@ function Risk() {
                 <p className="mt-1">{e.reason}</p>
                 <p className="text-muted-foreground">Next: {e.next_action} · Owner: {e.owner_role} · SLA: {e.sla_or_deadline_demo}</p>
                 <div className="mt-2 flex flex-wrap gap-2">
+                  <Btn variant="outline" onClick={() => setSelectedExceptionId(e.exception_id)}>
+                    {selectedException?.exception_id === e.exception_id ? "Viewing details" : "View details"}
+                  </Btn>
                   {e.linked_transaction_id && <Link to="/pools" search={{ tx: e.linked_transaction_id }} className="underline">{e.linked_transaction_id}</Link>}
                   {/open/i.test(e.status_demo) && <Btn onClick={() => dispatch({ type: "exception", id: e.exception_id, status: "Under investigation", actor: "Treasury Operations" })}>Start investigation</Btn>}
                   {!/resolved/i.test(e.status_demo) && <Btn variant="ink" onClick={() => dispatch({ type: "exception", id: e.exception_id, status: "Resolved (simulated)", actor: "Treasury Manager" })}>Mark resolved</Btn>}
@@ -113,16 +149,57 @@ function Risk() {
             ))}
           </ul>
         </Panel>
-        <Panel title="Policy compliance overview" note="Read-only; rules are explained on Screen 8">
-          <table className="data-table">
-            <thead><tr><th>Policy</th><th>Linked open items</th></tr></thead>
-            <tbody>
-              {policies.map((p) => {
-                const n = state.txns.filter((t) => !/payment/i.test(t.transaction_type) && String(t.policy_ids ?? "").includes(p.policy_id) && /blocked|pending|needs|validation|failed/i.test(t.status)).length;
-                return <tr key={p.policy_id}><td><Link to="/policies" className="underline">{p.policy_id}</Link> {p.policy_name}</td><td>{n ? <Status tone="warn">{n} open</Status> : <Status tone="ok">No open items</Status>}</td></tr>;
-              })}
-            </tbody>
-          </table>
+        <Panel title="Flagged Transaction Details" note="Read-only · select a flagged item to inspect it">
+          {selectedException ? (
+            <div className="space-y-4 text-xs">
+              <section className="space-y-2">
+                <h3 className="font-semibold">Transaction overview</h3>
+                <dl className="grid grid-cols-2 gap-2">
+                  <div><dt className="eyebrow">Transaction ID</dt><dd className="num mt-1">{selectedTransaction?.transaction_id ?? selectedException.linked_transaction_id ?? "Not linked"}</dd></div>
+                  <div><dt className="eyebrow">Type</dt><dd className="mt-1">{transactionTypeLabel(selectedTransaction?.transaction_type)}</dd></div>
+                  <div><dt className="eyebrow">Amount</dt><dd className="num mt-1">{selectedTransaction ? fmtNative(selectedTransaction.amount_native, selectedTransaction.currency) : "Not recorded"}</dd></div>
+                  <div><dt className="eyebrow">Initiated</dt><dd className="mt-1">{selectedTransaction?.submitted_timestamp_demo ?? selectedTransaction?.created_timestamp_demo ?? selectedTransaction?.created_at_demo ?? selectedException.detected_timestamp_demo ?? "Not recorded"}</dd></div>
+                  <div><dt className="eyebrow">Initiating entity</dt><dd className="mt-1">{selectedTransaction ? entityName(selectedTransaction.initiating_entity_id ?? selectedTransaction.from_entity_id) : entityName(selectedException.entity_id)}</dd></div>
+                  <div><dt className="eyebrow">Receiving entity</dt><dd className="mt-1">{selectedTransaction?.to_entity_id ? entityName(selectedTransaction.to_entity_id) : "Not applicable / not recorded"}</dd></div>
+                  <div><dt className="eyebrow">Source account</dt><dd className="mt-1">{accountLabel(selectedTransaction?.from_account_id)}</dd></div>
+                  <div><dt className="eyebrow">Destination account</dt><dd className="mt-1">{accountLabel(selectedTransaction?.to_account_id)}</dd></div>
+                </dl>
+                <div><span className="eyebrow">Current status</span><div className="mt-1"><Status>{selectedTransaction?.status ?? selectedException.status_demo}</Status></div></div>
+              </section>
+
+              <section className="space-y-2 border-t border-border pt-3">
+                <h3 className="font-semibold">Why was it flagged?</h3>
+                <p>{selectedException.reason}</p>
+                <p><span className="font-semibold">Risk in plain language: </span>{flagRiskExplanation(selectedException.exception_type)}</p>
+                <p className="text-muted-foreground">
+                  {selectedTransaction?.decision_rationale ?? "The transaction was referred for human investigation."}
+                </p>
+                <div>
+                  <div className="eyebrow">Relevant treasury policy or control</div>
+                  <p className="mt-1">{selectedTransaction?.required_control ?? "Human investigation required."}</p>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {String(selectedTransaction?.policy_ids ?? "").split(";").filter(Boolean).map((id: string) => (
+                      <Link key={id} to="/policies" className="underline">{id.trim()} · {policyById(id.trim())?.policy_name ?? "Policy details"}</Link>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-2 border-t border-border pt-3">
+                <h3 className="font-semibold">Required action · Group Treasurer</h3>
+                <ol className="list-decimal space-y-1 pl-4">
+                  <li>Ask the initiating entity or Front Office for the business purpose, urgency, and supporting records.</li>
+                  <li>Ask Middle Office to explain the original flag and confirm the applicable control and evidence gap.</li>
+                  <li>Check source, destination, amount, timing, legal restrictions, and whether the item is genuinely time-critical.</li>
+                  <li>If urgent, use only the documented escalation and authorised exception process; do not bypass mandatory controls or screening.</li>
+                  <li>Record the investigation outcome and decision in the audit trail; escalate unresolved legal or policy concerns.</li>
+                </ol>
+                <p className="text-muted-foreground">Queue next step: {selectedException.next_action}</p>
+              </section>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No flagged transaction matches the selected severity.</p>
+          )}
         </Panel>
       </div>
 
@@ -172,7 +249,7 @@ function Risk() {
             </table>
           </div>
         </Panel>
-        <Panel title="Audit trail" note="Updates as you act anywhere in the prototype">
+        <Panel title="Audit trail" note="Shows the History of Transactions">
           <div className="max-h-96 overflow-auto">
             <table className="data-table">
               <thead><tr><th>Time</th><th>Object</th><th>Action</th><th>Actor</th><th>Change</th></tr></thead>
