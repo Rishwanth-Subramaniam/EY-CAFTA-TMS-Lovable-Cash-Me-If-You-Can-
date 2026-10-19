@@ -27,6 +27,8 @@ type State = {
 };
 
 const now = () => "2026-10-17 " + new Date().toTimeString().slice(0, 5) + " IST (demo)";
+const SWEEP_REVIEWER = "Middle Office Reviewer (independent)";
+const LOAN_REVIEWER = "Middle Office Reviewer (independent)";
 
 const initial: State = {
   txns: seedTransactions.map((t) => ({ ...t })),
@@ -48,6 +50,12 @@ export const LIFECYCLE = [
 
 export function requiredControls(t: Txn) {
   const inr = toInr(t.amount_native ?? 0, t.currency);
+  if (t.is_intercompany_loan_request) return ["Middle Office Review"];
+  if (t.is_sweep_proposal) {
+    const roles = ["Middle Office Review"];
+    if (inr > FRONT_OFFICE_THRESHOLD_INR) roles.push("Front-office approver");
+    return roles;
+  }
   const roles = ["Maker", "Independent checker", "Sanctions screening"];
   if (inr > FRONT_OFFICE_THRESHOLD_INR) roles.push("Front-office approver");
   return roles;
@@ -71,7 +79,7 @@ export function validate(t: Txn): { ok: boolean; reasons: string[] } {
 type Action =
   | { type: "create"; txn: Txn }
   | { type: "status"; id: string; status: string; actor: string; reason: string; policy?: string }
-  | { type: "approve"; id: string; role: string; decision: "Approved" | "Rejected" }
+  | { type: "approve"; id: string; role: string; actor?: string; decision: "Approved" | "Rejected" }
   | { type: "failSweep"; id: string }
   | { type: "exception"; id: string; status: string; actor: string };
 
@@ -90,16 +98,46 @@ function reducer(s: State, a: Action): State {
   });
   switch (a.type) {
     case "create": {
-      const t: Txn = { ...a.txn, transaction_id: `TRX-${s.seq}`, status: "Draft (simulated)", created_timestamp_demo: now() };
+      const isSweepProposal = a.txn.is_sweep_proposal === true;
+      const isLoanRequest = a.txn.is_intercompany_loan_request === true;
+      const requiresMiddleOfficeReview = isSweepProposal || isLoanRequest;
+      const status = requiresMiddleOfficeReview ? "Pending Middle Office Review" : "Draft (simulated)";
+      const t: Txn = { ...a.txn, transaction_id: `TRX-${s.seq}`, status, created_timestamp_demo: now() };
+      const approvals = requiresMiddleOfficeReview
+        ? [
+            ...requiredControls(t).map((role, i) => ({
+              approval_id: `APR-${2100 + s.approvals.length + i}`,
+              transaction_id: t.transaction_id,
+              approval_type: role,
+              approver_role: role === "Middle Office Review" ? (isLoanRequest ? LOAN_REVIEWER : SWEEP_REVIEWER) : "Front-office approver (independent)",
+              status_demo: "Pending",
+              timestamp_demo: "",
+              segregation_of_duties_check: "Must differ from initiator",
+              execution_note: "Independent review required before execution",
+            })),
+            ...s.approvals,
+          ]
+        : s.approvals;
       return {
         ...s,
         seq: s.seq + 1,
         txns: [t, ...s.txns],
-        audit: [audit(t.transaction_id, "Proposal created", "Treasury Analyst (maker)", "—", t.status, t.decision_rationale), ...s.audit],
+        approvals,
+        audit: [audit(t.transaction_id, requiresMiddleOfficeReview ? (isLoanRequest ? "Intercompany loan request submitted for Middle Office review" : "Sweep submitted for Middle Office review") : "Proposal created", t.initiator ?? "Treasury Analyst (maker)", "—", t.status, t.decision_rationale), ...s.audit],
       };
     }
     case "status": {
       const t = s.txns.find((x) => x.transaction_id === a.id)!;
+      if (
+        t.is_intercompany_loan_request &&
+        /executed/i.test(a.status) &&
+        (!/approved/i.test(t.status) || t.credit_capacity_verified !== true)
+      ) {
+        return {
+          ...s,
+          audit: [audit(a.id, "Loan execution blocked", a.actor, t.status, t.status, "Execution requires independent approval and verified credit-line capacity."), ...s.audit],
+        };
+      }
       let approvals = s.approvals;
       if (a.status === "Pending approval" && !s.approvals.some((x) => x.transaction_id === a.id)) {
         approvals = [
@@ -119,24 +157,64 @@ function reducer(s: State, a: Action): State {
       return {
         ...s,
         approvals,
-        txns: s.txns.map((x) => (x.transaction_id === a.id ? { ...x, status: a.status, last_state_timestamp_demo: now() } : x)),
+        txns: s.txns.map((x) =>
+          x.transaction_id === a.id
+            ? {
+                ...x,
+                status: a.status,
+                last_state_timestamp_demo: now(),
+                ...(x.is_intercompany_loan_request && /executed/i.test(a.status)
+                  ? {
+                      funding_confirmed_timestamp_demo: now(),
+                      execution_note: "Funding confirmed by simulated execution event; no live bank movement",
+                      credit_utilisation_update_status: "Not updated: internal credit-line data is not recorded",
+                    }
+                  : {}),
+              }
+            : x,
+        ),
         audit: [audit(a.id, "State change", a.actor, t.status, a.status, a.reason, a.policy), ...s.audit],
       };
     }
     case "approve": {
+      const t = s.txns.find((x) => x.transaction_id === a.id)!;
+      const assignedPendingApproval = s.approvals.some(
+        (x) => x.transaction_id === a.id && x.approval_type === a.role && x.status_demo === "Pending",
+      );
+      const authorizedReviewer = t.is_intercompany_loan_request
+        ? a.role === "Middle Office Review" ? LOAN_REVIEWER : undefined
+        : t.is_sweep_proposal
+          ? a.role === "Middle Office Review" ? SWEEP_REVIEWER : a.role === "Front-office approver" ? "Front-office approver (independent)" : undefined
+          : undefined;
+      const approvalNotAllowed =
+        (t.is_intercompany_loan_request || t.is_sweep_proposal) &&
+        (!authorizedReviewer ||
+          a.actor !== authorizedReviewer ||
+          a.actor === t.initiator ||
+          !assignedPendingApproval ||
+          (t.is_intercompany_loan_request && a.decision === "Approved" && t.credit_capacity_verified !== true));
+      if (approvalNotAllowed) {
+        return {
+          ...s,
+          audit: [audit(a.id, "Approval attempt blocked", a.actor ?? a.role, t.status, t.status, t.is_intercompany_loan_request ? "Loan approval requires an authorised independent Middle Office reviewer and verified credit-line capacity." : "Sweep approval requires the authorised independent reviewer assigned to this approval step."), ...s.audit],
+        };
+      }
       const approvals = s.approvals.map((x) =>
         x.transaction_id === a.id && x.approval_type === a.role ? { ...x, status_demo: a.decision, timestamp_demo: now() } : x,
       );
       const mine = approvals.filter((x) => x.transaction_id === a.id);
-      const t = s.txns.find((x) => x.transaction_id === a.id)!;
       let status = t.status;
       if (a.decision === "Rejected") status = "Rejected (simulated)";
       else if (mine.length && mine.every((x) => x.status_demo === "Approved")) status = "Approved (simulated)";
+      else if (t.is_sweep_proposal && a.decision === "Approved") {
+        const pending = mine.find((x) => x.status_demo === "Pending");
+        if (pending) status = `Pending ${pending.approval_type === "Front-office approver" ? "Front-office Approval" : pending.approval_type}`;
+      }
       return {
         ...s,
         approvals,
         txns: s.txns.map((x) => (x.transaction_id === a.id ? { ...x, status } : x)),
-        audit: [audit(a.id, `${a.role}: ${a.decision}`, a.role, t.status, status, "Human approval step (simulated)"), ...s.audit],
+        audit: [audit(a.id, `${a.role}: ${a.decision}`, a.actor ?? a.role, t.status, status, "Human approval step (simulated)"), ...s.audit],
       };
     }
     case "failSweep": {
