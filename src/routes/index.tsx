@@ -71,7 +71,7 @@ function Overview() {
             </li>
             {failedSweeps.length > 0 && (
               <li className="rounded-sm border border-danger/30 bg-danger-soft p-2">
-                <Link to="/pools" className="font-semibold underline">{failedSweeps.length} failed sweep or blocked transfer needs review</Link>
+                <Link to="/risk" hash="exceptions" className="font-semibold underline">{failedSweeps.length} failed sweep or blocked transfer needs review</Link>
               </li>
             )}
           </ul>

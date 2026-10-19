@@ -130,7 +130,7 @@ function Risk() {
       </Panel>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel title="Exceptions & investigation queue" actions={<Select label="Severity" value={sev} onChange={setSev} options={["ALL", "High", "Medium", "Low"].map((v) => ({ value: v, label: v }))} />}>
+        <Panel id="exceptions" title="Exceptions & investigation queue" actions={<Select label="Severity" value={sev} onChange={setSev} options={["ALL", "High", "Medium", "Low"].map((v) => ({ value: v, label: v }))} />}>
           <ul className="space-y-2 text-xs">
             {exc.map((e) => (
               <li key={e.exception_id} className="rounded-sm border border-border p-3">
