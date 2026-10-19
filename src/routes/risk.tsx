@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { PageHeader, Panel, Status, Metric, Btn, Select, Note } from "@/components/ui-kit";
-import { entityName, fmtInr, fmtNative, toInr, FRONT_OFFICE_THRESHOLD_INR, policies } from "@/lib/data";
+import { entityName, fmtInr, fmtNative, toInr, policies } from "@/lib/data";
 import { useStore, requiredControls } from "@/lib/store";
 
 export const Route = createFileRoute("/risk")({
@@ -26,7 +26,6 @@ function Risk() {
   const [currencyFilter, setCurrencyFilter] = useState("ALL");
   const [ownerFilter, setOwnerFilter] = useState("ALL");
   const payments = state.txns.filter((t) => /payment/i.test(t.transaction_type));
-  const released = payments.filter((t) => /executed|reconciled/i.test(t.status));
   const blocked = state.txns.filter((t) => /blocked/i.test(t.status));
   const exc = state.exceptions.filter((e) => sev === "ALL" || e.severity === sev);
   const open = state.exceptions.filter((e) => !/resolved/i.test(e.status_demo));
@@ -54,9 +53,6 @@ function Risk() {
   const approvalEntities = ["ALL", ...new Set(approvalRows.map((row) => row.entity))];
   const approvalCurrencies = ["ALL", ...new Set(approvalRows.map((row) => row.currency))];
   const approvalOwners = ["ALL", ...new Set(approvalRows.map((row) => row.owner))];
-  const totalPendingApprovals = approvalRows.filter((row) => /pending/i.test(row.status)).length;
-  const totalFailedApprovals = approvalRows.filter((row) => /failed|blocked|reject/i.test(row.status)).length;
-
   const filteredApprovals = approvalRows.filter((row) => {
     const matchesQuickView =
       quickView === "ALL" ||
@@ -75,27 +71,15 @@ function Risk() {
   return (
     <>
       <PageHeader n={5} title="Risk & Compliance" sub="Every payment needs a maker, an independent checker and sanctions screening. Anomaly flags inform humans; they never approve, release or stop payments." about="Use this screen to monitor payment controls, open exceptions, approval status and the policy-backed decision trail. The actionable queue makes it easy to find pending approvals, failed sweeps and resolved flows without searching through the entire transaction register." />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric accent label="Open exceptions" value={open.length} />
+      <div className="grid grid-cols-2 gap-3">
+        <Metric accent label="Flagged Transactions" value={open.length} />
         <Metric label="Blocked by policy" value={blocked.length} sub="Count-based" />
-        <Metric label="Payments in queue" value={payments.length} sub={`${released.length} released (simulated)`} />
-        <Metric label="Front-office threshold" value={fmtInr(FRONT_OFFICE_THRESHOLD_INR)} sub="Configured threshold, illustrative" />
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <div className="rounded-md border border-border bg-card p-3">
-          <div className="eyebrow">Pending approvals</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{totalPendingApprovals}</div>
-          <div className="text-xs text-muted-foreground">Waiting for second-line review</div>
-        </div>
-        <div className="rounded-md border border-border bg-card p-3">
-          <div className="eyebrow">Failed / blocked</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{totalFailedApprovals}</div>
-          <div className="text-xs text-muted-foreground">Needs escalation or exception</div>
-        </div>
+      <div className="mt-4 grid gap-3">
         <div className="rounded-md border border-border bg-card p-3">
           <div className="eyebrow">Exception owner</div>
-          <div className="mt-2 text-lg font-semibold text-foreground">Treasury Ops</div>
+          <div className="mt-2 text-lg font-semibold text-foreground">Group Treasurer</div>
           <div className="text-xs text-muted-foreground">Human review required before release</div>
         </div>
       </div>
