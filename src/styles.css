@@ -6,7 +6,7 @@
 
 @theme inline {
   --font-sans: Arial, "Helvetica Neue", sans-serif;
-  --font-mono: "SFMono-Regular", "Consolas", monospace;
+  --font-mono: Arial, "Helvetica Neue", sans-serif;
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
@@ -114,7 +114,7 @@
 }
 
 @utility num {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
 }
 
