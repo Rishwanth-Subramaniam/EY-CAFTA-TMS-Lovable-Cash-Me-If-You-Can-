@@ -34,10 +34,14 @@ function Pools() {
   const { state, dispatch } = useStore();
   const [filter, setFilter] = useState("ALL");
   const t = state.txns.find((x) => x.transaction_id === tx);
-  const loanRequest = t?.is_intercompany_loan_request === true;
+  const loanRequest = Boolean(
+    t && (t.is_intercompany_loan_request === true || /intercompany loan/i.test(t.transaction_type)),
+  );
   const txApprovals = state.approvals.filter((a) => a.transaction_id === tx);
   const queue = state.txns.filter((x) => filter === "ALL" || (filter === "OPEN" ? stageIndex(x.status) < 4 && !/blocked|reject|failed/i.test(x.status) : filter === "BLOCKED" ? /blocked|reject|failed/i.test(x.status) : stageIndex(x.status) >= 4));
-  const ledger = state.txns.filter((x) => /intercompany loan/i.test(x.transaction_type) && /executed|reconciled/i.test(x.status));
+  const ledger = state.txns.filter(
+    (x) => x.is_intercompany_loan_request === true || /intercompany loan/i.test(x.transaction_type),
+  );
   const blocked = /blocked|reject|failed/i.test(t?.status ?? "");
   const linkedExceptions = state.exceptions.filter((e) => e.linked_transaction_id === t?.transaction_id);
   const issueSummary = blocked ? (t?.decision_rationale ?? "Transaction is blocked and needs a human decision.") : linkedExceptions.length > 0 ? linkedExceptions[0].reason : "No issue recorded — the transaction is progressing normally.";
@@ -100,10 +104,10 @@ function Pools() {
               <div className="grid grid-cols-2 gap-2">
                 <div><div className="eyebrow">Amount</div><div className="num font-semibold">{fmtNative(t.amount_native, t.currency)}</div><div className="num text-muted-foreground">{fmtInr(toInr(t.amount_native, t.currency))} INR equiv.</div></div>
                 <div><div className="eyebrow">Status</div><Status>{t.status}</Status></div>
-                <div><div className="eyebrow">{t.is_intercompany_loan_request ? "Proposed funding source" : "From"}</div>{entityName(t.is_intercompany_loan_request ? t.funding_source_entity_id : t.from_entity_id)}{(t.is_intercompany_loan_request ? t.funding_source_account_id : t.from_account_id) && <div className="text-muted-foreground">{t.is_intercompany_loan_request ? t.funding_source_account_id : t.from_account_id}</div>}</div>
-                <div><div className="eyebrow">{t.is_intercompany_loan_request ? "Borrowing entity" : "To"}</div>{entityName(t.is_intercompany_loan_request ? t.borrowing_entity_id : t.to_entity_id)}{!t.is_intercompany_loan_request && t.to_account_id && <div className="text-muted-foreground">{t.to_account_id}</div>}</div>
+                <div><div className="eyebrow">{loanRequest ? "Proposed funding source" : "From"}</div>{entityName(loanRequest ? t.funding_source_entity_id ?? t.from_entity_id : t.from_entity_id)}{(loanRequest ? t.funding_source_account_id ?? t.from_account_id : t.from_account_id) && <div className="text-muted-foreground">{loanRequest ? t.funding_source_account_id ?? t.from_account_id : t.from_account_id}</div>}</div>
+                <div><div className="eyebrow">{loanRequest ? "Borrowing entity" : "To"}</div>{entityName(loanRequest ? t.borrowing_entity_id ?? t.to_entity_id : t.to_entity_id)}{!loanRequest && t.to_account_id && <div className="text-muted-foreground">{t.to_account_id}</div>}</div>
               </div>
-              {t.is_intercompany_loan_request && (
+              {loanRequest && (
                 <div className="space-y-2 rounded-sm border border-border bg-muted p-2">
                   <div className="font-semibold">Intercompany loan request · {t.pool_id}</div>
                   <div>Approved credit-line limit: {t.credit_line_limit_native == null ? "Not recorded" : fmtNative(t.credit_line_limit_native, t.currency)}</div>
@@ -111,7 +115,7 @@ function Pools() {
                   <div>Remaining available credit: {t.available_credit_native == null ? "Cannot calculate — credit-line data missing" : fmtNative(t.available_credit_native, t.currency)}</div>
                   {t.business_purpose && <div>Business purpose: {t.business_purpose}</div>}
                   <div>Credit-line validation: {t.credit_capacity_verified ? "Verified" : "Requires Middle Office evidence."}</div>
-                  <div>Submitted by {t.initiator} · {t.submitted_timestamp_demo}</div>
+                  <div>Submitted by {t.initiator ?? "Originating entity"} · {t.submitted_timestamp_demo ?? t.created_timestamp_demo ?? t.created_at_demo}</div>
                   <div>Entity-originated request. Middle Office review and bank execution are handled outside this work queue.</div>
                   {t.funding_confirmed_timestamp_demo && <div>Funding confirmed by execution event: {t.funding_confirmed_timestamp_demo}. {t.credit_utilisation_update_status}</div>}
                 </div>
@@ -135,7 +139,7 @@ function Pools() {
               <div>
                 <div className="eyebrow mb-1">Required controls</div>
                 <div className="flex flex-wrap gap-1">{requiredControls(t).map((r) => <span key={r} className="rounded-sm border border-border px-1.5 py-0.5">{r}</span>)}</div>
-                {!t.is_intercompany_loan_request && <p className="mt-1 text-muted-foreground">Front-office approver required above {fmtInr(FRONT_OFFICE_THRESHOLD_INR)} INR equiv. — Configured threshold, illustrative.</p>}
+                {!loanRequest && <p className="mt-1 text-muted-foreground">Front-office approver required above {fmtInr(FRONT_OFFICE_THRESHOLD_INR)} INR equiv. — Configured threshold, illustrative.</p>}
               </div>
               {txApprovals.length > 0 && (
                 <>
@@ -194,12 +198,12 @@ function Pools() {
       </div>
 
       <div id="ledger" className="mt-4">
-        <Panel title="Intercompany loan ledger" note="Executed or reconciled intercompany loans only; pending requests remain in the transaction queue. Arm’s-length interest/TDS checks required.">
+        <Panel title="Intercompany loan ledger" note="Loan requests and completed intercompany loans, with their current status. Funding is recorded only after execution is confirmed. Arm’s-length interest/TDS checks required.">
           <table className="data-table">
-            <thead><tr><th>ID</th><th>Lender</th><th>Borrower</th><th>Principal</th><th>Status</th><th>Controls</th></tr></thead>
+            <thead><tr><th>ID</th><th>Funding source</th><th>Borrower</th><th>Requested / principal</th><th>Status</th><th>Next step</th></tr></thead>
             <tbody>
               {ledger.map((l) => (
-                <tr key={l.transaction_id} className="cursor-pointer" onClick={() => navigate({ search: { tx: l.transaction_id } })}><td className="num">{l.transaction_id}</td><td>{entityName(l.from_entity_id)}</td><td>{entityName(l.to_entity_id)}</td><td className="num">{fmtNative(l.amount_native, l.currency)}</td><td><Status>{l.status}</Status></td><td className="text-muted-foreground">{l.required_control}</td></tr>
+                <tr key={l.transaction_id} className="cursor-pointer" onClick={() => navigate({ search: { tx: l.transaction_id } })}><td className="num">{l.transaction_id}</td><td>{entityName(l.funding_source_entity_id ?? l.from_entity_id)}</td><td>{entityName(l.borrowing_entity_id ?? l.to_entity_id)}</td><td className="num">{fmtNative(l.amount_native, l.currency)}</td><td><Status>{l.status}</Status></td><td className="text-muted-foreground">{/executed|reconciled/i.test(l.status) ? "Funding confirmed" : /approved/i.test(l.status) ? "Bank execution pending" : /reject|blocked|failed/i.test(l.status) ? "Request closed" : "Middle Office review"}</td></tr>
               ))}
             </tbody>
           </table>
