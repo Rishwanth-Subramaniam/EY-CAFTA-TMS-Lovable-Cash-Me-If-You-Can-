@@ -19,7 +19,6 @@ export const Route = createFileRoute("/cash")({
 const ACTIONS = [
   { key: "sweep", label: "Simulate Sweep", type: "Pool sweep proposal" },
   { key: "transfer", label: "Propose Transfer", type: "Transfer proposal" },
-  { key: "icl", label: "Request Intercompany Loan", type: "Intercompany loan request" },
   { key: "invest", label: "Invest Surplus", type: "Investment proposal" },
 ] as const;
 
@@ -76,185 +75,6 @@ const sourceAccountForEntity = (entityId: string): SweepAccount | undefined => {
       }
     : undefined;
 };
-
-function IntercompanyLoanRequestForm({ initialEntityId }: { initialEntityId: string }) {
-  const [borrowerId, setBorrowerId] = useState(initialEntityId);
-  const [amount, setAmount] = useState("");
-  const [purpose, setPurpose] = useState("");
-  const { dispatch, state } = useStore();
-  const navigate = useNavigate();
-
-  const borrower = entityById(borrowerId);
-  const currency = borrower?.native_currency ?? "";
-  const borrowerPool = borrower?.pool_id
-    ? currencyPools.find((p) => p.pool_id === borrower.pool_id && p.currency === currency)
-    : undefined;
-  const participants = borrowerPool
-    ? String(borrowerPool.participant_entity_ids).split(";").map((id) => id.trim())
-    : [];
-  const masterEntity = borrowerPool ? entityById(borrowerPool.master_entity_id) : undefined;
-  const fundingCandidates = borrowerPool
-    ? accounts
-        .filter(
-          (a) =>
-            a.entity_id === borrowerPool.master_entity_id &&
-            a.currency === borrowerPool.currency &&
-            a.bank_id === borrowerPool.bank_id &&
-            a.current_status_demo === "Active",
-        )
-        .sort((a, b) => Number(b.account_type.toLowerCase().includes("master")) - Number(a.account_type.toLowerCase().includes("master")))
-    : [];
-  const fundingAccount = fundingCandidates.find(
-    (a) =>
-      a.account_type.toLowerCase().includes("master") ||
-      (a.account_type === "Operating account" && masterEntity?.entity_role.toLowerCase().includes("master")),
-  );
-  const validation = masterEntity
-    ? validate({ from_entity_id: masterEntity.entity_id, to_entity_id: borrowerId, currency })
-    : { ok: true, reasons: [] as string[] };
-  const amountValue = amount.trim() === "" ? NaN : Number(amount);
-
-  const eligibilityErrors: string[] = [];
-  if (!borrower) eligibilityErrors.push("Select a borrowing legal entity.");
-  if (borrower && borrower.pool_eligible_under_scenario !== true) {
-    eligibilityErrors.push("This borrowing entity is not eligible for the funding arrangement under the current scenario.");
-  }
-  if (!borrowerPool) eligibilityErrors.push("No currency pool matches the borrowing entity and requested currency.");
-  if (borrowerPool && borrower && !participants.includes(borrowerId)) {
-    eligibilityErrors.push("The borrowing entity is not a participant in this currency pool.");
-  }
-  if (borrowerPool && borrowerPool.status_demo !== "Simulated target state") {
-    eligibilityErrors.push(`The ${borrowerPool.pool_name} is not an active funding arrangement (${borrowerPool.status_demo}).`);
-  }
-  if (borrowerPool && masterEntity?.entity_id === borrowerId) {
-    eligibilityErrors.push("The pool master cannot request an intercompany loan from itself.");
-  }
-  if (!fundingAccount) eligibilityErrors.push("No active master account is configured at this pool's bank and currency.");
-  if (validation.reasons.length) eligibilityErrors.push(...validation.reasons);
-
-  const amountErrors: string[] = [];
-  if (!(amountValue > 0)) amountErrors.push("Enter a positive loan amount.");
-
-  const approvedLimit: number | null = null;
-  const outstandingUtilisation: number | null = null;
-  const availableCredit =
-    approvedLimit !== null && outstandingUtilisation !== null
-      ? Math.max(0, approvedLimit - outstandingUtilisation)
-      : null;
-  if (availableCredit !== null && amountValue > availableCredit) {
-    amountErrors.push(`Amount exceeds available credit of ${fmtNative(availableCredit, currency)}.`);
-  }
-  const canSubmit = eligibilityErrors.length === 0 && amountErrors.length === 0 && Boolean(borrowerPool && fundingAccount && masterEntity);
-
-  const submitLoanRequest = () => {
-    if (!canSubmit || !borrower || !borrowerPool || !fundingAccount || !masterEntity) return;
-    const transactionId = `TRX-${state.seq}`;
-    dispatch({
-      type: "create",
-      txn: {
-        transaction_type: "Intercompany loan request",
-        is_intercompany_loan_request: true,
-        initiator: "Front Office (requester)",
-        submitted_timestamp_demo: new Date().toISOString(),
-        pool_id: borrowerPool.pool_id,
-        from_entity_id: masterEntity.entity_id,
-        to_entity_id: borrowerId,
-        to_account_id: fundingAccount.account_id,
-        funding_source_entity_id: masterEntity.entity_id,
-        funding_source_account_id: fundingAccount.account_id,
-        borrowing_entity_id: borrowerId,
-        currency,
-        amount_native: amountValue,
-        credit_line_limit_native: approvedLimit,
-        outstanding_utilisation_native: outstandingUtilisation,
-        available_credit_native: availableCredit,
-        credit_capacity_verified: false,
-        credit_capacity_review_required: true,
-        business_purpose: purpose.trim(),
-        decision_rationale: [
-          `Funding request for ${borrower.entity_name_demo} from the configured ${borrowerPool.pool_name} master.`,
-          "Internal credit-line capacity cannot be verified: no approved limit or outstanding utilisation is recorded.",
-          purpose.trim() ? `Business purpose: ${purpose.trim()}` : "",
-          `Pool restrictions: ${borrowerPool.eligibility_and_restrictions} ${borrower.pool_rule}`,
-        ].filter(Boolean).join(" "),
-        required_control: "Independent Middle Office review; credit capacity evidence required before approval",
-        execution_note: "Pending review; no cash transferred and no credit utilisation updated",
-        policy_ids: "POL-ICL-01",
-      },
-    });
-    navigate({ to: "/pools", search: { tx: transactionId } });
-  };
-
-  return (
-    <div className="mt-4 space-y-4 rounded-sm border border-border bg-muted p-3 text-xs">
-      <div>
-        <div className="font-semibold">Request Intercompany Loan — review required</div>
-        <p className="mt-1 text-muted-foreground">The funding pool and master account are resolved automatically. This is a funding request, not a cash transfer instruction.</p>
-      </div>
-      <section className="grid gap-3 rounded-sm border border-border bg-card p-3 md:grid-cols-[1fr_1fr]">
-        <label className="block">Borrowing legal entity
-          <select value={borrowerId} onChange={(e) => setBorrowerId(e.target.value)} className="mt-1 w-full rounded-sm border border-input bg-card px-2 py-1.5">
-            {entities.map((entity) => <option key={entity.entity_id} value={entity.entity_id}>{entity.entity_name_demo}</option>)}
-          </select>
-        </label>
-        <div><div className="eyebrow">Requested currency</div><div className="mt-2 font-semibold">{currency || "—"}</div></div>
-      </section>
-
-      <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
-        <section className="space-y-3 rounded-sm border border-border bg-card p-3">
-          <h3 className="font-semibold">Requested amount</h3>
-          <label className="block">Requested loan amount ({currency || "native"})
-            <input type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} aria-invalid={amountErrors.length > 0} className="num mt-1 w-full rounded-sm border border-input bg-card px-2 py-1.5" />
-          </label>
-          {amountErrors.map((error) => <p key={error} className="text-danger" role="alert">{error}</p>)}
-          <label className="block">Business purpose or justification (optional)
-            <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={3} className="mt-1 w-full rounded-sm border border-input bg-card px-2 py-1.5" />
-          </label>
-        </section>
-
-        <section className="space-y-3 rounded-sm border border-border bg-card p-3">
-          <h3 className="font-semibold">Internal credit-line capacity</h3>
-          <div className="grid grid-cols-2 gap-2">
-            <div><div className="eyebrow">Approved credit-line limit</div><div className="num mt-1 font-semibold">{approvedLimit === null ? "Not recorded" : fmtNative(approvedLimit, currency)}</div></div>
-            <div><div className="eyebrow">Outstanding utilisation</div><div className="num mt-1 font-semibold">{outstandingUtilisation === null ? "Not recorded" : fmtNative(outstandingUtilisation, currency)}</div></div>
-          </div>
-          <div className="rounded-sm border border-warning/30 bg-warning-soft p-2">
-            <div className="eyebrow">Remaining available credit</div>
-            <div className="num mt-1 text-lg font-semibold">{availableCredit === null ? "Cannot calculate" : fmtNative(availableCredit, currency)}</div>
-            <p className="mt-1">Available credit = approved limit − outstanding utilisation. Neither value is present in the internal credit-line data.</p>
-          </div>
-          <p className="text-warning">This request can be submitted for review only. Middle Office approval and execution are blocked until the credit-line limit and utilisation are recorded and verified.</p>
-        </section>
-      </div>
-
-      <div className={`rounded-sm border p-3 ${eligibilityErrors.length ? "border-danger/30 bg-danger-soft text-danger" : availableCredit === null ? "border-warning/30 bg-warning-soft text-warning" : "border-success/30 bg-success-soft text-success"}`} role="status">
-        <div className="font-semibold">{eligibilityErrors.length ? "Funding arrangement unavailable" : availableCredit === null ? "Funding route resolved · credit review required" : "Funding arrangement resolved"}</div>
-        <p className="mt-1">{eligibilityErrors.length ? eligibilityErrors.join(" ") : `${borrowerPool?.pool_name} · ${currency} · borrowing entity is an eligible participant.${availableCredit === null ? " Internal credit-line limit and utilisation are not recorded." : ""}`}</p>
-        {borrower && <p className="mt-1">Restrictions: {borrower.pool_rule}{borrowerPool ? ` · ${borrowerPool.eligibility_and_restrictions}` : ""}</p>}
-      </div>
-
-      <section className="rounded-sm border-2 border-primary bg-accent p-3">
-        <h3 className="font-semibold">Proposed Funding Source</h3>
-        <p className="mt-1 text-muted-foreground">Read-only · resolved from the borrowing entity's eligible currency pool</p>
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <div><div className="eyebrow">Pool master account</div><div className="mt-1 font-semibold">{fundingAccount ? `${fundingAccount.account_id} · ${bankName(fundingAccount.bank_id)}` : "No valid master account"}</div></div>
-          <div><div className="eyebrow">Master legal entity</div><div className="mt-1 font-semibold">{masterEntity?.entity_name_demo ?? "—"}</div></div>
-          <div><div className="eyebrow">Currency pool</div><div className="mt-1 font-semibold">{borrowerPool?.pool_name ?? "—"}</div></div>
-        </div>
-        {!fundingAccount && <p className="mt-2 text-danger" role="alert">Submission is blocked because no valid pool master account was found.</p>}
-      </section>
-
-      <div className="rounded-sm border border-border bg-card p-3">
-        <div className="eyebrow">Request summary</div>
-        <p className="mt-1">{borrower?.entity_name_demo ?? "—"} · {amountValue > 0 ? fmtNative(amountValue, currency) : "Amount not entered"} · {currency || "—"} · Credit limit: not recorded · Remaining capacity: unavailable · {borrowerPool?.pool_name ?? "No pool"} · Funding: {fundingAccount?.account_id ?? "unavailable"}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Btn variant="ink" disabled={!canSubmit} onClick={submitLoanRequest}>Submit Loan Request for Review</Btn>
-        <span className="text-muted-foreground">Submission creates a pending review request only; it does not transfer cash or update credit utilisation.</span>
-      </div>
-    </div>
-  );
-}
 
 function SweepProposalForm({ initialEntityId }: { initialEntityId: string }) {
   const sourceEntityId = initialEntityId;
@@ -500,8 +320,6 @@ function Cash() {
               </div>
               {action?.key === "sweep" ? (
                 <SweepProposalForm key={selected.entity_id} initialEntityId={selected.entity_id} />
-              ) : action?.key === "icl" ? (
-                <IntercompanyLoanRequestForm key={selected.entity_id} initialEntityId={selected.entity_id} />
               ) : action && (
                 <div className="mt-4 space-y-2 rounded-sm border border-border bg-muted p-3 text-xs">
                   <div className="font-semibold">{action.label} — new proposal</div>

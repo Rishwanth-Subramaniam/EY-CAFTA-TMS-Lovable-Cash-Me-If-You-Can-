@@ -34,6 +34,7 @@ function Pools() {
   const { state, dispatch } = useStore();
   const [filter, setFilter] = useState("ALL");
   const t = state.txns.find((x) => x.transaction_id === tx);
+  const loanRequest = t?.is_intercompany_loan_request === true;
   const txApprovals = state.approvals.filter((a) => a.transaction_id === tx);
   const queue = state.txns.filter((x) => filter === "ALL" || (filter === "OPEN" ? stageIndex(x.status) < 4 && !/blocked|reject|failed/i.test(x.status) : filter === "BLOCKED" ? /blocked|reject|failed/i.test(x.status) : stageIndex(x.status) >= 4));
   const ledger = state.txns.filter((x) => /intercompany loan/i.test(x.transaction_type) && /executed|reconciled/i.test(x.status));
@@ -87,7 +88,7 @@ function Pools() {
         <Panel className="min-w-0" title={t ? `${t.transaction_id} · ${t.transaction_type}` : "Select a transaction"} note={t ? `Created ${t.created_timestamp_demo ?? t.created_at_demo}` : "Proposals from Screen 2 open here automatically."}>
           {t ? (
             <div className="space-y-4 text-xs">
-              <ol className="flex flex-wrap gap-1">
+              {!loanRequest && <ol className="flex flex-wrap gap-1">
                 {LIFECYCLE.map((s, i) => {
                   const done = !blocked && stageIndex(t.status) >= i;
                   const label = (t.is_sweep_proposal || t.is_intercompany_loan_request) && s === "Pending approval"
@@ -95,7 +96,7 @@ function Pools() {
                     : s.replace(" (simulated)", "");
                   return <li key={s} className={cn("flex items-center gap-1 rounded-sm border px-1.5 py-1", done ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground")}>{done && <Check className="h-3 w-3" />}{label}</li>;
                 })}
-              </ol>
+              </ol>}
               <div className="grid grid-cols-2 gap-2">
                 <div><div className="eyebrow">Amount</div><div className="num font-semibold">{fmtNative(t.amount_native, t.currency)}</div><div className="num text-muted-foreground">{fmtInr(toInr(t.amount_native, t.currency))} INR equiv.</div></div>
                 <div><div className="eyebrow">Status</div><Status>{t.status}</Status></div>
@@ -109,9 +110,9 @@ function Pools() {
                   <div>Outstanding utilisation: {t.outstanding_utilisation_native == null ? "Not recorded" : fmtNative(t.outstanding_utilisation_native, t.currency)}</div>
                   <div>Remaining available credit: {t.available_credit_native == null ? "Cannot calculate — credit-line data missing" : fmtNative(t.available_credit_native, t.currency)}</div>
                   {t.business_purpose && <div>Business purpose: {t.business_purpose}</div>}
-                  <div>Credit-line validation: {t.credit_capacity_verified ? "Verified" : "Requires Middle Office evidence; approval and execution are blocked."}</div>
+                  <div>Credit-line validation: {t.credit_capacity_verified ? "Verified" : "Requires Middle Office evidence."}</div>
                   <div>Submitted by {t.initiator} · {t.submitted_timestamp_demo}</div>
-                  <div>Submission is a request only; approval does not transfer cash.</div>
+                  <div>Entity-originated request. Middle Office review and bank execution are handled outside this work queue.</div>
                   {t.funding_confirmed_timestamp_demo && <div>Funding confirmed by execution event: {t.funding_confirmed_timestamp_demo}. {t.credit_utilisation_update_status}</div>}
                 </div>
               )}
@@ -124,7 +125,7 @@ function Pools() {
                 <div className="rounded-sm border border-danger/30 bg-danger-soft p-2 text-xs">
                   <div className="font-semibold text-danger">Next step required</div>
                   <p className="mt-1">{issueSummary}</p>
-                  {linkedExceptions.length > 0 && (
+                  {!loanRequest && linkedExceptions.length > 0 && (
                     <div className="mt-1 text-muted-foreground">Exception: {linkedExceptions[0].exception_id} · {linkedExceptions[0].next_action}</div>
                   )}
                 </div>
@@ -139,23 +140,23 @@ function Pools() {
               {txApprovals.length > 0 && (
                 <>
                   {t.is_sweep_proposal && <p className="font-semibold">Only the authorised independent reviewer assigned to each step can approve or reject. The initiator cannot approve this sweep.</p>}
-                  {t.is_intercompany_loan_request && <p className="font-semibold">Front Office cannot approve its own request. Middle Office independently reviews the request, restrictions and limits. Missing credit-line data keeps approval and execution disabled.</p>}
+                  {loanRequest && <p className="font-semibold">View-only request record. Approval and bank execution are not performed in this work queue.</p>}
                   <table className="data-table">
-                    <thead><tr><th>Step</th><th>Role</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th>Step</th><th>Role</th><th>Status</th>{!loanRequest && <th></th>}</tr></thead>
                     <tbody>
                       {txApprovals.map((a) => (
                         <tr key={a.approval_id}>
                           <td>{a.approval_type}<div className="text-muted-foreground">{a.segregation_of_duties_check}</div></td>
                           <td>{a.approver_role}</td>
                           <td><Status>{a.status_demo}</Status></td>
-                          <td className="whitespace-nowrap">{a.status_demo === "Pending" && !blocked && (<><Btn disabled={t.is_intercompany_loan_request && t.credit_capacity_verified !== true} onClick={() => dispatch({ type: "approve", id: t.transaction_id, role: a.approval_type, actor: t.is_sweep_proposal || t.is_intercompany_loan_request ? a.approver_role : a.approval_type, decision: "Approved" })}>{t.is_intercompany_loan_request ? "Approve for execution" : "Approve"}</Btn> <Btn variant="danger" onClick={() => dispatch({ type: "approve", id: t.transaction_id, role: a.approval_type, actor: t.is_sweep_proposal || t.is_intercompany_loan_request ? a.approver_role : a.approval_type, decision: "Rejected" })}>Reject</Btn></>)}</td>
+                          {!loanRequest && <td className="whitespace-nowrap">{a.status_demo === "Pending" && !blocked && (<><Btn onClick={() => dispatch({ type: "approve", id: t.transaction_id, role: a.approval_type, actor: t.is_sweep_proposal ? a.approver_role : a.approval_type, decision: "Approved" })}>Approve</Btn> <Btn variant="danger" onClick={() => dispatch({ type: "approve", id: t.transaction_id, role: a.approval_type, actor: t.is_sweep_proposal ? a.approver_role : a.approval_type, decision: "Rejected" })}>Reject</Btn></>)}</td>}
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </>
               )}
-              <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+              {!loanRequest && <div className="flex flex-wrap gap-2 border-t border-border pt-3">
                 {stageIndex(t.status) === 0 && !blocked && <Btn variant="ink" onClick={runValidation}>Run validation</Btn>}
                 {(stageIndex(t.status) === 1 || (stageIndex(t.status) === 2 && txApprovals.length === 0)) && <Btn variant="ink" onClick={() => dispatch({ type: "status", id: t.transaction_id, status: "Pending approval", actor: "Treasury Analyst (maker)", reason: "Submitted for independent approval" })}>Submit for approval</Btn>}
                 {stageIndex(t.status) === 3 && <Btn variant="primary" onClick={() => dispatch({ type: "status", id: t.transaction_id, status: "Executed (simulated)", actor: "System (simulated)", reason: "Execution simulated — no real money moved" })}>Simulate execution</Btn>}
@@ -163,7 +164,7 @@ function Pools() {
                 {stageIndex(t.status) === 4 && <Btn variant="ink" onClick={() => dispatch({ type: "status", id: t.transaction_id, status: "Reconciled (simulated)", actor: "Statement matching (simulated)", reason: "Matched to next-morning statement (simulated)" })}>Reconcile</Btn>}
                 {blocked && <Link to="/risk" className="font-semibold underline">Investigate in Risk & Compliance →</Link>}
                 <Link to="/policies" className="font-semibold underline">Why? Decision explanation →</Link>
-              </div>
+              </div>}
               <p className="text-muted-foreground">{t.execution_note ?? "Simulated only"} · No live bank, TMS or SWIFT connection.</p>
             </div>
           ) : (
