@@ -22,6 +22,8 @@ function Overview() {
   const { state } = useStore();
   const openExc = state.exceptions.filter((e) => e.status_demo !== "Resolved (simulated)");
   const pending = state.txns.filter((t) => /pending|validation|needs|draft/i.test(t.status));
+  const failedSweeps = state.txns.filter((t) => /failed|blocked/i.test(t.status));
+  const cleared = state.txns.filter((t) => /reconciled|approved|executed/i.test(t.status)).length;
   const overlapData = currencyGroups.map((g) => ({
     ccy: g.currency + (g.included_in_headline_overlap === "Yes" ? "" : " (island)"),
     Cash: m(g.cash_inr_equivalent),
@@ -29,7 +31,7 @@ function Overview() {
   }));
   return (
     <>
-      <PageHeader n={1} title="Treasury Overview — Control Tower" sub="Group-level headlines across 25 illustrative entities in 15 countries. All INR figures are equivalents at static illustrative rates (₹96.85 per USD), not market rates." />
+      <PageHeader n={1} title="Treasury Overview — Control Tower" sub="Group-level headlines across 25 illustrative entities in 15 countries. All INR figures are equivalents at static illustrative rates (₹96.85 per USD), not market rates." about="Executive view of group liquidity, borrowings, same-currency overlap, forecast performance and pending issues. Use this screen to spot exceptions, blocked actions and the most material treasury risks before drilling into entity or pool detail." />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric accent label="Group cash (INR equiv.)" value={fmtInr(groupCash)} sub={groupCash === CANON.groupCash ? "Reconciles to case total" : "Check vs case total"} />
         <Metric label="Group borrowings (INR equiv.)" value={fmtInr(groupDebt)} sub="Gross external debt" />
@@ -39,6 +41,29 @@ function Overview() {
         <Metric label="One-time cost" value={fmtInr(CANON.oneTimeCost)} sub={`Payback Week ${CANON.paybackWeek} (≈ Month 17)`} />
         <Metric label="FX cost vs market mid" value={`${CANON.fxBaselineBps} bps`} sub={`Assumed baseline; TCA Weeks 2–8 · target ${CANON.fxTargetBps} bps by Month 6`} />
         <Metric label="Banks / accounts" value={`${CANON.banksBaseline} → ${CANON.banksTarget} · ${CANON.accountsBaseline} → ${CANON.accountsTarget}`} sub="Programme milestone, Week 39" />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className="rounded-md border border-border bg-card p-3">
+          <div className="eyebrow">Open exceptions</div>
+          <div className="mt-2 text-2xl font-semibold text-foreground">{openExc.length}</div>
+          <div className="text-xs text-muted-foreground">Human investigation required</div>
+        </div>
+        <div className="rounded-md border border-border bg-card p-3">
+          <div className="eyebrow">Pending approvals</div>
+          <div className="mt-2 text-2xl font-semibold text-foreground">{pending.length}</div>
+          <div className="text-xs text-muted-foreground">Waiting on second-line review</div>
+        </div>
+        <div className="rounded-md border border-border bg-card p-3">
+          <div className="eyebrow">Failed sweeps</div>
+          <div className="mt-2 text-2xl font-semibold text-foreground">{failedSweeps.length}</div>
+          <div className="text-xs text-muted-foreground">No automatic retry</div>
+        </div>
+        <div className="rounded-md border border-border bg-card p-3">
+          <div className="eyebrow">Cleared transactions</div>
+          <div className="mt-2 text-2xl font-semibold text-foreground">{cleared}</div>
+          <div className="text-xs text-muted-foreground">Executed or reconciled in demo</div>
+        </div>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -60,15 +85,23 @@ function Overview() {
         </Panel>
         <Panel title="Alerts" note="Simulated" actions={<Link to="/risk" className="text-xs font-semibold underline">Risk →</Link>}>
           <ul className="space-y-2 text-xs">
-            {openExc.map((e) => (
+            {openExc.length === 0 ? (
+              <li className="rounded-sm border border-border p-2 text-muted-foreground">No open exceptions in this demo state.</li>
+            ) : openExc.map((e) => (
               <li key={e.exception_id} className="rounded-sm border border-border p-2">
                 <div className="flex justify-between gap-2"><span className="num font-semibold">{e.exception_id}</span><Status>{e.severity}</Status></div>
                 <div className="mt-1 text-muted-foreground">{e.exception_type} · {entityName(e.entity_id)}</div>
+                <div className="mt-1 text-muted-foreground">Next: {e.next_action}</div>
               </li>
             ))}
             <li className="rounded-sm border border-border p-2">
               <Link to="/pools" className="font-semibold underline">{pending.length} transactions awaiting validation/approval</Link>
             </li>
+            {failedSweeps.length > 0 && (
+              <li className="rounded-sm border border-danger/30 bg-danger-soft p-2">
+                <Link to="/pools" className="font-semibold underline">{failedSweeps.length} failed sweep or blocked transfer needs review</Link>
+              </li>
+            )}
           </ul>
         </Panel>
       </div>

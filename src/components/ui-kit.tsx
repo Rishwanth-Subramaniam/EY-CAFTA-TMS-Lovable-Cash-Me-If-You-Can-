@@ -1,13 +1,19 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-export function PageHeader({ n, title, sub, children }: { n: number; title: string; sub: string; children?: ReactNode }) {
+export function PageHeader({ n, title, sub, children, about }: { n: number; title: string; sub: string; children?: ReactNode; about?: string }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
-      <div>
+      <div className="min-w-0 flex-1">
         <div className="eyebrow">Screen {n} of 8</div>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{sub}</p>
+        <p className="mt-1 max-w-4xl text-sm text-muted-foreground">{sub}</p>
+        {about && (
+          <details className="group mt-3 max-w-4xl rounded-md border border-border bg-muted/40">
+            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-foreground">About this screen</summary>
+            <p className="border-t border-border px-3 py-2 text-xs leading-relaxed text-muted-foreground">{about}</p>
+          </details>
+        )}
       </div>
       {children && <div className="flex flex-wrap gap-2">{children}</div>}
     </div>

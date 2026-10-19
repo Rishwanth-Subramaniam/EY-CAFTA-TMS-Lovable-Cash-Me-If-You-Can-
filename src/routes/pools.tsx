@@ -38,6 +38,8 @@ function Pools() {
   const queue = state.txns.filter((x) => filter === "ALL" || (filter === "OPEN" ? stageIndex(x.status) < 4 && !/blocked|reject|failed/i.test(x.status) : filter === "BLOCKED" ? /blocked|reject|failed/i.test(x.status) : stageIndex(x.status) >= 4));
   const ledger = state.txns.filter((x) => /intercompany loan/i.test(x.transaction_type));
   const blocked = /blocked|reject|failed/i.test(t?.status ?? "");
+  const linkedExceptions = state.exceptions.filter((e) => e.linked_transaction_id === t?.transaction_id);
+  const issueSummary = blocked ? (t?.decision_rationale ?? "Transaction is blocked and needs a human decision.") : linkedExceptions.length > 0 ? linkedExceptions[0].reason : "No issue recorded — the transaction is progressing normally.";
 
   const runValidation = () => {
     if (!t) return;
@@ -47,7 +49,7 @@ function Pools() {
 
   return (
     <>
-      <PageHeader n={3} title="Cash Pools & Transfers" sub="Continue proposals started on Screen 2 through validation, approvals, simulated execution and reconciliation. Bank-configured sweeps appear as simulated automated events." />
+      <PageHeader n={3} title="Cash Pools & Transfers" sub="Continue proposals started on Screen 2 through validation, approvals, simulated execution and reconciliation. Bank-configured sweeps appear as simulated automated events." about="This is the work queue for every proposed transfer or sweep. Review the lifecycle state, required controls, failure reason and available next step before moving a transaction to approval or reconciliation." />
 
       <Panel title="Pools and currency groups" note="Primary active headers: EUR at HSBC Netherlands, USD at Citi USA, INR at the existing Indian partner bank. Standby accounts are not pool masters.">
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
@@ -97,6 +99,15 @@ function Pools() {
                 <div><div className="eyebrow">From</div>{entityName(t.from_entity_id)}</div>
                 <div><div className="eyebrow">To</div>{entityName(t.to_entity_id)}</div>
               </div>
+              {(blocked || linkedExceptions.length > 0) && (
+                <div className="rounded-sm border border-danger/30 bg-danger-soft p-2 text-xs">
+                  <div className="font-semibold text-danger">Next step required</div>
+                  <p className="mt-1">{issueSummary}</p>
+                  {linkedExceptions.length > 0 && (
+                    <div className="mt-1 text-muted-foreground">Exception: {linkedExceptions[0].exception_id} · {linkedExceptions[0].next_action}</div>
+                  )}
+                </div>
+              )}
               <p><span className="font-semibold">Rationale: </span>{t.decision_rationale}</p>
               <p><span className="font-semibold">Policies: </span>{String(t.policy_ids ?? "").split(";").filter(Boolean).map((p: string) => <Link key={p} to="/policies" className="mr-2 underline">{p} {policyById(p.trim())?.policy_name ? `(${policyById(p.trim())?.policy_name})` : ""}</Link>)}</p>
               <div>

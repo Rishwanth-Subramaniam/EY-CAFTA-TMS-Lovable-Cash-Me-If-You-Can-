@@ -38,7 +38,7 @@ function Reports() {
 
   return (
     <>
-      <PageHeader n={6} title="Reports & Analytics" sub="Exactly seven programme KPIs, in order. Baselines that are not yet measured are shown as pending — never as zero or success." />
+      <PageHeader n={6} title="Reports & Analytics" sub="Exactly seven programme KPIs, in order. Baselines that are not yet measured are shown as pending — never as zero or success." about="Review the transformation scorecard, benefit case and milestone roadmap. This screen separates baseline, target, actual and variance, while clearly distinguishing measured performance from pending or illustrative demo states." />
       <Panel title="Programme KPIs (7)">
         <div className="overflow-x-auto">
           <table className="data-table">

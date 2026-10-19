@@ -72,7 +72,7 @@ function Cash() {
 
   return (
     <>
-      <PageHeader n={2} title="Cash Position by Entity" sub="Native currency is the record of truth. INR equivalents use static illustrative rates and are shown separately — never mixed into native totals.">
+      <PageHeader n={2} title="Cash Position by Entity" sub="Native currency is the record of truth. INR equivalents use static illustrative rates and are shown separately — never mixed into native totals." about="Entity-level view of cash, debt, restrictions and operating targets. Use the actions panel to start a proposal, validate whether it is eligible for movement and carry the transaction through to the pool workflow in Screen 3.">
         <Select label="Currency group" value={ccy} onChange={setCcy} options={[{ value: "ALL", label: "All groups (separated)" }, ...ccys.map((c) => ({ value: c, label: c }))]} />
       </PageHeader>
 

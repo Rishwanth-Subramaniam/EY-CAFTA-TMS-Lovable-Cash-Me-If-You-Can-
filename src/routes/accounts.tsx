@@ -30,7 +30,7 @@ function Accounts() {
 
   return (
     <>
-      <PageHeader n={7} title="Banks & Accounts" sub="Assessment of the illustrative account inventory. Recommendations require offline follow-up — this prototype contains no closure action or workflow." />
+      <PageHeader n={7} title="Banks & Accounts" sub="Assessment of the illustrative account inventory. Recommendations require offline follow-up — this prototype contains no closure action or workflow." about="This screen shows the account rationalisation inventory and the recommended treatment for each account. It is designed for decisions and consultation, not for live closure execution; closure remains an offline treasury action beyond this prototype." />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Baseline accounts" value={accounts.length} />
         <Metric accent label="Target accounts (Week 39)" value={targetAccounts.length} sub={comp.map((c) => c.n).join(" + ") + ` = ${CANON.accountsTarget}`} />

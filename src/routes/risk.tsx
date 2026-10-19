@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader, Panel, Status, Metric, Btn, Select, Note } from "@/components/ui-kit";
 import { entityName, fmtInr, fmtNative, toInr, FRONT_OFFICE_THRESHOLD_INR, policies } from "@/lib/data";
 import { useStore, requiredControls } from "@/lib/store";
@@ -19,20 +19,85 @@ export const Route = createFileRoute("/risk")({
 function Risk() {
   const { state, dispatch } = useStore();
   const [sev, setSev] = useState("ALL");
+  const [quickView, setQuickView] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [entityFilter, setEntityFilter] = useState("ALL");
+  const [currencyFilter, setCurrencyFilter] = useState("ALL");
+  const [ownerFilter, setOwnerFilter] = useState("ALL");
   const payments = state.txns.filter((t) => /payment/i.test(t.transaction_type));
   const released = payments.filter((t) => /executed|reconciled/i.test(t.status));
   const blocked = state.txns.filter((t) => /blocked/i.test(t.status));
   const exc = state.exceptions.filter((e) => sev === "ALL" || e.severity === sev);
   const open = state.exceptions.filter((e) => !/resolved/i.test(e.status_demo));
 
+  const approvalRows = useMemo(() => {
+    return state.approvals.map((a) => {
+      const txn = state.txns.find((t) => t.transaction_id === a.transaction_id);
+      const status = a.status_demo || "Pending";
+      return {
+        ...a,
+        txn,
+        entity: txn ? entityName(txn.from_entity_id) : "—",
+        currency: txn?.currency ?? "—",
+        amount: txn ? fmtNative(txn.amount_native, txn.currency) : "—",
+        amountInr: txn ? fmtInr(toInr(txn.amount_native, txn.currency)) : "—",
+        status,
+        owner: a.approver_role,
+        updated: a.timestamp_demo || "Pending",
+      };
+    });
+  }, [state.approvals, state.txns]);
+
+  const approvalTypes = ["ALL", ...new Set(approvalRows.map((row) => row.txn?.transaction_type ?? "Other"))];
+  const approvalStatuses = ["ALL", ...new Set(approvalRows.map((row) => row.status))];
+  const approvalEntities = ["ALL", ...new Set(approvalRows.map((row) => row.entity))];
+  const approvalCurrencies = ["ALL", ...new Set(approvalRows.map((row) => row.currency))];
+  const approvalOwners = ["ALL", ...new Set(approvalRows.map((row) => row.owner))];
+  const totalPendingApprovals = approvalRows.filter((row) => /pending/i.test(row.status)).length;
+  const totalFailedApprovals = approvalRows.filter((row) => /failed|blocked|reject/i.test(row.status)).length;
+
+  const filteredApprovals = approvalRows.filter((row) => {
+    const matchesQuickView =
+      quickView === "ALL" ||
+      (quickView === "PENDING" && /pending/i.test(row.status)) ||
+      (quickView === "FAILED" && /failed|blocked|reject/i.test(row.status || "") ) ||
+      (quickView === "RESOLVED" && /approved|resolved|reconciled|executed/i.test(row.status || "")) ||
+      (quickView === "RECENT" && /approved|reconciled|executed/i.test(row.status || ""));
+    const matchesStatus = statusFilter === "ALL" || row.status === statusFilter;
+    const matchesType = typeFilter === "ALL" || row.txn?.transaction_type === typeFilter;
+    const matchesEntity = entityFilter === "ALL" || row.entity === entityFilter;
+    const matchesCurrency = currencyFilter === "ALL" || row.currency === currencyFilter;
+    const matchesOwner = ownerFilter === "ALL" || row.owner === ownerFilter;
+    return matchesQuickView && matchesStatus && matchesType && matchesEntity && matchesCurrency && matchesOwner;
+  });
+
   return (
     <>
-      <PageHeader n={5} title="Risk & Compliance" sub="Every payment needs a maker, an independent checker and sanctions screening. Anomaly flags inform humans; they never approve, release or stop payments." />
+      <PageHeader n={5} title="Risk & Compliance" sub="Every payment needs a maker, an independent checker and sanctions screening. Anomaly flags inform humans; they never approve, release or stop payments." about="Use this screen to monitor payment controls, open exceptions, approval status and the policy-backed decision trail. The actionable queue makes it easy to find pending approvals, failed sweeps and resolved flows without searching through the entire transaction register." />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric accent label="Open exceptions" value={open.length} />
         <Metric label="Blocked by policy" value={blocked.length} sub="Count-based" />
         <Metric label="Payments in queue" value={payments.length} sub={`${released.length} released (simulated)`} />
         <Metric label="Front-office threshold" value={fmtInr(FRONT_OFFICE_THRESHOLD_INR)} sub="Configured threshold, illustrative" />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="rounded-md border border-border bg-card p-3">
+          <div className="eyebrow">Pending approvals</div>
+          <div className="mt-2 text-2xl font-semibold text-foreground">{totalPendingApprovals}</div>
+          <div className="text-xs text-muted-foreground">Waiting for second-line review</div>
+        </div>
+        <div className="rounded-md border border-border bg-card p-3">
+          <div className="eyebrow">Failed / blocked</div>
+          <div className="mt-2 text-2xl font-semibold text-foreground">{totalFailedApprovals}</div>
+          <div className="text-xs text-muted-foreground">Needs escalation or exception</div>
+        </div>
+        <div className="rounded-md border border-border bg-card p-3">
+          <div className="eyebrow">Exception owner</div>
+          <div className="mt-2 text-lg font-semibold text-foreground">Treasury Ops</div>
+          <div className="text-xs text-muted-foreground">Human review required before release</div>
+        </div>
       </div>
 
       <Panel className="mt-4" title="Payment-control compliance monitor" note="Each payment shows its required control set">
@@ -98,11 +163,48 @@ function Risk() {
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel title="Approvals register" note="Simulated approvals — not real sign-offs">
-          <div className="max-h-96 overflow-auto">
+        <Panel title="Approvals register" note="Simulated approvals — not real sign-offs" actions={
+          <div className="flex flex-wrap gap-2">
+            {[
+              ["ALL", "All actions"],
+              ["PENDING", "Pending approvals"],
+              ["FAILED", "Failed sweeps"],
+              ["RESOLVED", "Resolved actions"],
+              ["RECENT", "Recently approved"],
+            ].map(([key, label]) => (
+              <button key={key} onClick={() => setQuickView(key)} className={quickView === key ? "rounded-sm bg-primary px-2 py-1 text-[0.7rem] font-semibold text-primary-foreground" : "rounded-sm border border-border px-2 py-1 text-[0.7rem] text-muted-foreground hover:bg-muted"}>{label}</button>
+            ))}
+          </div>
+        }>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Select label="Status" value={statusFilter} onChange={setStatusFilter} options={approvalStatuses.map((v) => ({ value: v, label: v }))} />
+            <Select label="Type" value={typeFilter} onChange={setTypeFilter} options={approvalTypes.map((v) => ({ value: v, label: v }))} />
+            <Select label="Entity" value={entityFilter} onChange={setEntityFilter} options={approvalEntities.map((v) => ({ value: v, label: v }))} />
+            <Select label="Currency" value={currencyFilter} onChange={setCurrencyFilter} options={approvalCurrencies.map((v) => ({ value: v, label: v }))} />
+            <Select label="Owner" value={ownerFilter} onChange={setOwnerFilter} options={approvalOwners.map((v) => ({ value: v, label: v }))} />
+            <button onClick={() => { setQuickView("ALL"); setStatusFilter("ALL"); setTypeFilter("ALL"); setEntityFilter("ALL"); setCurrencyFilter("ALL"); setOwnerFilter("ALL"); }} className="rounded-sm border border-border px-2 py-1.5 text-[0.7rem] font-semibold text-foreground hover:bg-muted">Clear filters</button>
+          </div>
+          <div className="max-h-[22rem] overflow-auto">
             <table className="data-table">
-              <thead><tr><th>ID</th><th>Txn</th><th>Step</th><th>Role</th><th>Status</th></tr></thead>
-              <tbody>{state.approvals.map((a) => <tr key={a.approval_id}><td className="num">{a.approval_id}</td><td className="num">{a.transaction_id}</td><td>{a.approval_type}</td><td>{a.approver_role}</td><td><Status>{a.status_demo}</Status></td></tr>)}</tbody>
+              <thead><tr><th>ID</th><th>Action</th><th>Entity</th><th>Currency</th><th>Amount</th><th>Status</th><th>Owner</th><th>Last updated</th><th>Link</th></tr></thead>
+              <tbody>
+                {filteredApprovals.map((row) => (
+                  <tr key={row.approval_id}>
+                    <td className="num">{row.approval_id}</td>
+                    <td>
+                      <div className="font-medium">{row.approval_type}</div>
+                      <div className="text-muted-foreground">{row.txn?.transaction_type ?? "—"}</div>
+                    </td>
+                    <td>{row.entity}</td>
+                    <td className="num">{row.currency}</td>
+                    <td className="num">{row.amount}</td>
+                    <td><Status>{row.status}</Status></td>
+                    <td>{row.owner}</td>
+                    <td className="num">{row.updated}</td>
+                    <td><Link to="/pools" search={{ tx: row.transaction_id }} className="underline">View</Link></td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </Panel>

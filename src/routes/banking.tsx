@@ -36,7 +36,7 @@ function Banking() {
   const debtTotal = currencyGroups.reduce((s, g) => s + g.debt_inr_equivalent, 0);
   return (
     <>
-      <PageHeader n={4} title="Banking & Counterparties" sub={`Target ${CANON.banksTarget} bank relationships from a baseline of ${CANON.banksBaseline}. Ratings are not verified — illustrative placeholders only.`} />
+      <PageHeader n={4} title="Banking & Counterparties" sub={`Target ${CANON.banksTarget} bank relationships from a baseline of ${CANON.banksBaseline}. Ratings are not verified — illustrative placeholders only.`} about="Map the target banking landscape, active pool headers, standby accounts and the pending relationship lenders. This screen summarises the design assumptions and flags where data is intentionally illustrative rather than live bank information." />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric accent label="Committed external credit lines" value={fmtInr(CANON.committedLines)} sub="Kept ready for liquidity" />
         <Metric label="Gross borrowings (INR equiv.)" value={fmtInr(debtTotal)} />

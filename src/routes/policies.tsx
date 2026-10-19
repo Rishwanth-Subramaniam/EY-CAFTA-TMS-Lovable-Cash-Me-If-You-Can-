@@ -33,7 +33,7 @@ function Policies() {
 
   return (
     <>
-      <PageHeader n={8} title="Treasury Policies, Logic & Decision Transparency" sub="Read-only. Policies are owned by the Treasury Committee; employees cannot create, edit, delete or submit policies here." />
+      <PageHeader n={8} title="Treasury Policies, Logic & Decision Transparency" sub="Read-only. Policies are owned by the Treasury Committee; employees cannot create, edit, delete or submit policies here." about="Use this page to understand why a transfer was blocked, approved or recommended. It shows the relevant rule, the decision evidence and the object or transaction affected, without allowing any edits to the policy library." />
 
       <Panel title="System flow" note="Rules run routine operations; people approve exceptions; machine forecasting must earn its place.">
         <div className="flex flex-wrap items-center gap-1 text-xs">
