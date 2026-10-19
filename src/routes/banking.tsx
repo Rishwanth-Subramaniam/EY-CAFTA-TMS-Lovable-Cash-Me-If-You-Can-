@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageHeader, Panel, Status, Metric, Note } from "@/components/ui-kit";
-import { banks, accounts, targetAccounts, currencyGroups, fxDeals, fmtInr, fmtNative, CANON, RATES, entityName } from "@/lib/data";
+import { banks, targetAccounts, currencyGroups, fxDeals, fmtInr, fmtNative, CANON, RATES, entityName } from "@/lib/data";
 
 export const Route = createFileRoute("/banking")({
   head: () => ({
@@ -37,11 +37,10 @@ function Banking() {
   return (
     <>
       <PageHeader n={4} title="Banking & Counterparties" sub={`Target ${CANON.banksTarget} bank relationships from a baseline of ${CANON.banksBaseline}. Ratings are not verified — illustrative placeholders only.`} about="Map the target banking landscape, active pool headers, standby accounts and the pending relationship lenders. This screen summarises the design assumptions and flags where data is intentionally illustrative rather than live bank information." />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Metric accent label="Committed external credit lines" value={fmtInr(CANON.committedLines)} sub="Kept ready for liquidity" />
         <Metric label="Gross borrowings (INR equiv.)" value={fmtInr(debtTotal)} />
         <Metric label="Bank relationships" value={`${CANON.banksBaseline} → ${CANON.banksTarget}`} sub="By Week 39" />
-        <Metric label="Relationship lenders" value="2 pending" sub="Loan register review (Day 90)" />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -64,24 +63,23 @@ function Banking() {
         </Panel>
       </div>
 
-      <Panel className="mt-4" title="Counterparties" note="Account counts from the illustrative inventory (baseline 102 / target 42)">
+      <Panel className="mt-4" title="Counterparties" note="Target-state banking relationships and target account allocation (42 total)">
         <table className="data-table">
-          <thead><tr><th>Bank</th><th>Role & coverage</th><th>Type</th><th>Rating</th><th>Baseline accts</th><th>Target accts</th><th>Note</th></tr></thead>
+          <thead><tr><th>Target bank</th><th>Role & coverage</th><th>Type</th><th>Rating</th><th>Target accounts</th><th>Note</th></tr></thead>
           <tbody>
-            {banks.map((b) => (
+            {banks.filter((b) => b.relationship_type !== "Baseline bank candidate; no target relationship").map((b) => (
               <tr key={b.bank_id}>
                 <td className="font-medium">{b.bank_name_demo}</td>
                 <td>{b.role_and_coverage}</td>
                 <td>{b.relationship_type}</td>
                 <td><Status tone="warn">{b.rating_demo}</Status></td>
-                <td className="num">{accounts.filter((a) => a.bank_id === b.bank_id).length}</td>
                 <td className="num">{targetAccounts.filter((a) => a.bank_id === b.bank_id).length}</td>
                 <td className="text-muted-foreground">{b.selection_or_relationship_note}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <Note>Counterparty limits are not provided in the case data — shown as “to be set by Treasury Committee”. No lender winner is invented.</Note>
+        <Note>The target allocation totals 42 accounts across seven target relationships. Counterparty limits are not provided in the case data — shown as “to be set by Treasury Committee”. No lender winner is invented.</Note>
       </Panel>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">

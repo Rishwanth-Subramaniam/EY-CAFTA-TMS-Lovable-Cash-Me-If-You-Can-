@@ -26,7 +26,7 @@ function Accounts() {
   const rows = useMemo(() => accounts.filter((a) => (rec === "ALL" || a.recommendation === rec) && (bank === "ALL" || a.bank_id === bank) && (country === "ALL" || a.country === country)), [rec, bank, country]);
   const a = accounts.find((x) => x.account_id === sel);
   const comp = ["Operating account", "Second-currency account", "Pool header", "Local-rule account", "Standby account"].map((t) => ({ t, n: targetAccounts.filter((x) => x.account_type === t).length }));
-  const recCounts = ["Retain", "Consolidate candidate", "Review for exit", "Insufficient information"].map((r) => ({ r, n: accounts.filter((x) => x.recommendation === r).length }));
+  const recCounts = ["Retain (target plan)", "Consolidate candidate", "Review for exit", "Insufficient information"].map((r) => ({ r, n: accounts.filter((x) => x.recommendation === r).length }));
 
   return (
     <>
@@ -51,7 +51,7 @@ function Accounts() {
               </button>
             ))}
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">Mandatory legal need blocks an exit recommendation regardless of score.</p>
+          <p className="mt-2 text-xs text-muted-foreground">42 accounts are assigned to the indicative target plan; 28 are consolidation candidates, 28 are for exit review and 4 still need information. Target-plan assignments remain subject to legal, dependency and operational validation. Mandatory legal need blocks an exit recommendation regardless of score.</p>
         </Panel>
       </div>
 
@@ -69,6 +69,7 @@ function Accounts() {
               </tbody>
             </table>
           </div>
+          <Note>Recommendations reconcile to the 42-account target plan. Ten target-plan assignments need account-purpose, legal and dependency verification; they are not closure or retention instructions. The 102 baseline accounts are distributed across 25 plausible bank names for this illustrative inventory. These account-to-bank assignments are not verified GCPL relationships; the existing Indian partner's name remains pending confirmation.</Note>
         </Panel>
         <Panel title={a ? a.account_id : "Account detail"} note={a ? `${a.entity_name_demo} · ${bankName(a.bank_id)}` : "Select an account"} className="xl:sticky xl:top-16 xl:self-start">
           {a ? (
