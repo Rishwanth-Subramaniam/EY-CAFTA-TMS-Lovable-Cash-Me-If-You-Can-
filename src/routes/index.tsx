@@ -23,7 +23,6 @@ function Overview() {
   const openExc = state.exceptions.filter((e) => e.status_demo !== "Resolved (simulated)");
   const pending = state.txns.filter((t) => /pending|validation|needs|draft/i.test(t.status));
   const failedSweeps = state.txns.filter((t) => /failed|blocked/i.test(t.status));
-  const cleared = state.txns.filter((t) => /reconciled|approved|executed/i.test(t.status)).length;
   const overlapData = currencyGroups.map((g) => ({
     ccy: g.currency + (g.included_in_headline_overlap === "Yes" ? "" : " (island)"),
     Cash: m(g.cash_inr_equivalent),
@@ -37,33 +36,6 @@ function Overview() {
         <Metric label="Group borrowings (INR equiv.)" value={fmtInr(groupDebt)} sub="Gross external debt" />
         <Metric accent label="Same-currency cash/debt overlap" value={fmtInr(headlineOverlap)} sub={<>Target {fmtInr(CANON.overlapMonth7)} by Month 7 · gross basis, islands excluded</>} />
         <Metric label="Committed external credit lines" value={fmtInr(CANON.committedLines)} sub="Kept ready · see Screen 4" />
-        <Metric label="Net annual benefit" value={fmtInr(CANON.netAnnualBenefit)} sub={<>Benefit {fmtInr(CANON.annualBenefit)} − running cost {fmtInr(CANON.annualRunningCost)}</>} />
-        <Metric label="One-time cost" value={fmtInr(CANON.oneTimeCost)} sub={`Payback Week ${CANON.paybackWeek} (≈ Month 17)`} />
-        <Metric label="FX cost vs market mid" value={`${CANON.fxBaselineBps} bps`} sub={`Assumed baseline; TCA Weeks 2–8 · target ${CANON.fxTargetBps} bps by Month 6`} />
-        <Metric label="Banks / accounts" value={`${CANON.banksBaseline} → ${CANON.banksTarget} · ${CANON.accountsBaseline} → ${CANON.accountsTarget}`} sub="Programme milestone, Week 39" />
-      </div>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <div className="rounded-md border border-border bg-card p-3">
-          <div className="eyebrow">Open exceptions</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{openExc.length}</div>
-          <div className="text-xs text-muted-foreground">Human investigation required</div>
-        </div>
-        <div className="rounded-md border border-border bg-card p-3">
-          <div className="eyebrow">Pending approvals</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{pending.length}</div>
-          <div className="text-xs text-muted-foreground">Waiting on second-line review</div>
-        </div>
-        <div className="rounded-md border border-border bg-card p-3">
-          <div className="eyebrow">Failed sweeps</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{failedSweeps.length}</div>
-          <div className="text-xs text-muted-foreground">No automatic retry</div>
-        </div>
-        <div className="rounded-md border border-border bg-card p-3">
-          <div className="eyebrow">Cleared transactions</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{cleared}</div>
-          <div className="text-xs text-muted-foreground">Executed or reconciled in demo</div>
-        </div>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
