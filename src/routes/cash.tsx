@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { PageHeader, Panel, Status, Btn, Select, Note, Metric } from "@/components/ui-kit";
-import { accounts, bankName, cashPositions, entities, entityById, fmtInr, fmtNative, forecast, LOCAL_ISLANDS, pools as currencyPools, RATES, REPAY_AT_HOME } from "@/lib/data";
+import { accounts, bankName, cashPositions, entities, entityById, fmtInr, fmtNative, forecast, LOCAL_ISLANDS, pools as currencyPools, RATES, REPAY_AT_HOME, targetAccounts } from "@/lib/data";
 import { useStore, validate } from "@/lib/store";
 
 export const Route = createFileRoute("/cash")({
@@ -31,10 +31,51 @@ function operatingTarget(entityId: string) {
 }
 
 const accountsForEntity = (entityId: string) => accounts.filter((a) => a.entity_id === entityId);
-const defaultSourceAccount = (entityId: string) =>
-  accountsForEntity(entityId).find((a) => a.current_status_demo === "Active" && a.account_type === "Operating account")?.account_id ??
-  accountsForEntity(entityId)[0]?.account_id ??
-  "";
+type SweepAccount = {
+  account_id: string;
+  entity_id: string;
+  currency: string;
+  bank_id: string;
+  account_type: string;
+  current_status_demo: string;
+};
+const asTargetAccount = (account: (typeof targetAccounts)[number]): SweepAccount => ({
+  account_id: account.target_account_id,
+  entity_id: account.entity_id,
+  currency: account.currency,
+  bank_id: account.bank_id,
+  account_type: account.account_type,
+  current_status_demo: account.target_state_status,
+});
+const sourceAccountForEntity = (entityId: string): SweepAccount | undefined => {
+  const currency = entityById(entityId)?.native_currency;
+  const activeAccount = accountsForEntity(entityId).find(
+    (a) => a.currency === currency && a.current_status_demo === "Active" && a.account_type === "Operating account",
+  );
+  if (activeAccount) {
+    return {
+      account_id: activeAccount.account_id,
+      entity_id: activeAccount.entity_id,
+      currency: activeAccount.currency,
+      bank_id: activeAccount.bank_id,
+      account_type: activeAccount.account_type,
+      current_status_demo: activeAccount.current_status_demo,
+    };
+  }
+  const targetAccount = targetAccounts.find(
+    (a) => a.entity_id === entityId && a.currency === currency && a.account_type === "Operating account",
+  );
+  return targetAccount
+    ? {
+        account_id: cashPositions.find((c) => c.entity_id === entityId)?.cash_position_id ?? targetAccount.target_account_id,
+        entity_id: targetAccount.entity_id,
+        currency: targetAccount.currency,
+        bank_id: targetAccount.bank_id,
+        account_type: targetAccount.account_type,
+        current_status_demo: targetAccount.target_state_status,
+      }
+    : undefined;
+};
 
 function IntercompanyLoanRequestForm({ initialEntityId }: { initialEntityId: string }) {
   const [borrowerId, setBorrowerId] = useState(initialEntityId);
@@ -216,17 +257,17 @@ function IntercompanyLoanRequestForm({ initialEntityId }: { initialEntityId: str
 }
 
 function SweepProposalForm({ initialEntityId }: { initialEntityId: string }) {
-  const [sourceEntityId, setSourceEntityId] = useState(initialEntityId);
-  const [sourceAccountId, setSourceAccountId] = useState(defaultSourceAccount(initialEntityId));
+  const sourceEntityId = initialEntityId;
+  const sourceAccount = sourceAccountForEntity(initialEntityId);
+  const sourceAccountIsTarget = sourceAccount?.current_status_demo !== "Active";
   const [amount, setAmount] = useState("");
   const { dispatch, state } = useStore();
   const navigate = useNavigate();
 
   const sourceEntity = entityById(sourceEntityId);
-  const sourceAccount = accounts.find((a) => a.account_id === sourceAccountId);
   const cashPosition = cashPositions.find((c) => c.entity_id === sourceEntityId);
-  const sourceCurrency = sourceAccount?.currency ?? sourceEntity?.native_currency ?? "";
-  const sourcePool = sourceEntity?.pool_id && sourceAccount
+  const sourceCurrency = sourceEntity?.native_currency ?? "";
+  const sourcePool = sourceEntity?.pool_id
     ? currencyPools.find(
         (p) =>
           p.pool_id === sourceEntity.pool_id &&
@@ -234,20 +275,42 @@ function SweepProposalForm({ initialEntityId }: { initialEntityId: string }) {
           String(p.participant_entity_ids).split(";").map((id) => id.trim()).includes(sourceEntityId),
       )
     : undefined;
-  const availableBalance = sourceAccount ? Number(sourceAccount.balance_inr_equivalent_demo) / (RATES[sourceCurrency] ?? 1) : 0;
-  const operatingRequirement = sourceEntity ? operatingTarget(sourceEntityId) : 0;
-  const maximumSweep = Math.max(0, availableBalance - operatingRequirement);
+  const masterEntity = sourcePool ? entityById(sourcePool.master_entity_id) : undefined;
+  const locallyContained =
+    Boolean(
+      sourceEntity &&
+      masterEntity &&
+      sourcePool &&
+      sourceEntity.country === masterEntity.country &&
+      String(sourcePool.participant_entity_ids).split(";").map((id) => id.trim()).includes(sourceEntityId) &&
+      String(sourcePool.participant_entity_ids).split(";").map((id) => id.trim()).includes(masterEntity.entity_id),
+    );
   const masterCandidates = sourcePool
-    ? accounts
-        .filter((a) => a.entity_id === sourcePool.master_entity_id && a.currency === sourcePool.currency && a.bank_id === sourcePool.bank_id && a.current_status_demo === "Active")
+    ? ([
+        ...accounts.filter(
+          (a) =>
+            a.entity_id === sourcePool.master_entity_id &&
+            a.currency === sourcePool.currency &&
+            a.current_status_demo === "Active" &&
+            a.bank_id === sourcePool.bank_id,
+        ),
+        ...targetAccounts
+          .filter(
+            (a) =>
+              a.entity_id === sourcePool.master_entity_id &&
+              a.currency === sourcePool.currency &&
+              a.bank_id === sourcePool.bank_id &&
+              a.account_type === "Operating account",
+          )
+          .map(asTargetAccount),
+      ] as SweepAccount[])
         .sort((a, b) => Number(b.account_type.toLowerCase().includes("master")) - Number(a.account_type.toLowerCase().includes("master")))
     : [];
   const masterAccount = masterCandidates.find(
     (a) =>
       a.account_type.toLowerCase().includes("master") ||
-      (a.account_type === "Operating account" && entityById(a.entity_id)?.entity_role.toLowerCase().includes("master")),
+      a.account_type === "Operating account",
   );
-  const masterEntity = masterAccount ? entityById(masterAccount.entity_id) : undefined;
   const amountValue = amount.trim() === "" ? NaN : Number(amount);
   const routeValidation =
     sourceEntity && masterEntity && sourceAccount
@@ -257,16 +320,22 @@ function SweepProposalForm({ initialEntityId }: { initialEntityId: string }) {
   const sourceErrors: string[] = [];
   if (!sourceEntity) sourceErrors.push("Select a source legal entity.");
   if (!sourceAccount) sourceErrors.push("Select a source bank account.");
-  if (sourceAccount && sourceAccount.current_status_demo !== "Active") sourceErrors.push("The source account is not active.");
-  if (sourceAccount && sourceAccount.account_type !== "Operating account") sourceErrors.push("Only an active operating account is eligible for routine sweeps.");
+  if (sourceAccount && sourceAccount.current_status_demo !== "Active" && !sourceAccountIsTarget) sourceErrors.push("The source account is not active.");
+  if (sourceAccount && sourceAccount.account_type !== "Operating account") sourceErrors.push("Only an operating account or configured target-state operating account is eligible for routine sweeps.");
   if (sourceEntity && sourceAccount && sourceAccount.currency !== sourceEntity.native_currency) sourceErrors.push("The source account currency does not match the legal entity's native currency.");
-  if (sourceEntity && sourceEntity.pool_eligible_under_scenario !== true) sourceErrors.push("This legal entity is not eligible for a pool sweep under the current scenario.");
-  if (cashPosition && cashPosition.pool_eligible_under_scenario !== true) sourceErrors.push("The cash position is marked ineligible for pooling.");
+  if (sourceEntity && sourceEntity.pool_eligible_under_scenario !== true && !locallyContained) {
+    sourceErrors.push("This legal entity is not eligible for a pool sweep, and no same-country funding route is configured.");
+  }
+  if (cashPosition && cashPosition.pool_eligible_under_scenario !== true && !locallyContained) {
+    sourceErrors.push("The cash position is marked ineligible for pooling, and no same-country funding route is configured.");
+  }
   if (!sourcePool) sourceErrors.push("No matching currency pool is configured for this source account and legal entity.");
   if (sourcePool && !String(sourcePool.participant_entity_ids).split(";").map((id) => id.trim()).includes(sourceEntityId)) {
     sourceErrors.push("The source legal entity is not a participant in this currency pool.");
   }
-  if (sourcePool && sourcePool.status_demo !== "Simulated target state") sourceErrors.push(`The ${sourcePool.pool_name} is not configured for routine sweeps (${sourcePool.status_demo}).`);
+  if (sourcePool && sourcePool.status_demo !== "Simulated target state" && !locallyContained) {
+    sourceErrors.push(`The ${sourcePool.pool_name} is not configured for routine sweeps (${sourcePool.status_demo}), and the route is not locally contained.`);
+  }
   if (!masterAccount) sourceErrors.push("No active master account is configured at this pool's master bank and currency.");
   if (sourceAccount && masterAccount && sourceAccount.account_id === masterAccount.account_id) {
     sourceErrors.push("The source account is the pool master account; it cannot sweep to itself.");
@@ -274,9 +343,8 @@ function SweepProposalForm({ initialEntityId }: { initialEntityId: string }) {
   if (routeValidation.reasons.length) sourceErrors.push(...routeValidation.reasons);
 
   const amountErrors: string[] = [];
-  if (!(amountValue > 0)) amountErrors.push("Enter a positive sweep amount.");
-  else if (amountValue > maximumSweep) amountErrors.push(`Amount exceeds the eligible maximum of ${fmtNative(maximumSweep, sourceCurrency)} after the operating cash requirement.`);
-  const canSubmit = sourceErrors.length === 0 && amountErrors.length === 0 && Boolean(sourcePool && masterAccount && masterEntity);
+  if (amount.trim() !== "" && !(amountValue > 0)) amountErrors.push("Enter a positive sweep amount.");
+  const canSubmit = sourceErrors.length === 0 && amountValue > 0 && amountErrors.length === 0 && Boolean(sourcePool && masterAccount && masterEntity);
 
   const submitSweep = () => {
     if (!canSubmit || !sourceEntity || !sourceAccount || !sourcePool || !masterAccount || !masterEntity) return;
@@ -295,7 +363,7 @@ function SweepProposalForm({ initialEntityId }: { initialEntityId: string }) {
         to_account_id: masterAccount.account_id,
         currency: sourceCurrency,
         amount_native: amountValue,
-        decision_rationale: `Sweep proposal from ${sourceEntity.entity_name_demo} to the configured ${sourcePool.pool_name} master account. Available balance ${fmtNative(availableBalance, sourceCurrency)} less operating cash requirement ${fmtNative(operatingRequirement, sourceCurrency)}; validated maximum ${fmtNative(maximumSweep, sourceCurrency)}.`,
+        decision_rationale: `Sweep proposal from ${sourceEntity.entity_name_demo} to the configured ${sourcePool.pool_name} master account. Destination resolved within the configured currency pool; locally contained route: ${locallyContained ? "yes" : "no"}.`,
         required_control: "Authorised independent Middle Office review before execution",
         execution_note: "Pending review; no cash deducted and no live bank movement",
         policy_ids: "POL-CASH-01;POL-POOL-01",
@@ -305,76 +373,24 @@ function SweepProposalForm({ initialEntityId }: { initialEntityId: string }) {
   };
 
   return (
-    <div className="mt-4 space-y-4 rounded-sm border border-border bg-muted p-3 text-xs">
-      <div>
-        <div className="font-semibold">Simulate Sweep — proposal for review</div>
-        <p className="mt-1 text-muted-foreground">The system selects the master account configured for this currency pool. The destination cannot be changed.</p>
+    <div className="mt-4 space-y-3 rounded-sm border border-border bg-muted p-3 text-xs">
+      <div className="font-semibold">Simulate Sweep — new proposal</div>
+      <label className="block">Amount ({sourceCurrency}, native)
+        <input type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} aria-invalid={amountErrors.length > 0} className="num mt-1 w-full rounded-sm border border-input bg-card px-2 py-1.5" />
+      </label>
+      {amountErrors.length > 0 && <p className="text-danger" role="alert">{amountErrors.join(" ")}</p>}
+      <div className="rounded-sm border border-border bg-card p-2">
+        <div className="eyebrow">Destination · {sourcePool?.pool_name ?? "No configured pool"}</div>
+        <div className="mt-1 font-semibold">{masterEntity?.entity_name_demo ?? "No valid master account"}{masterAccount ? ` · ${bankName(masterAccount.bank_id)} · ${masterAccount.account_id}` : ""}</div>
+        <p className="mt-1 text-muted-foreground">
+          Automatically selected pool master · {sourceCurrency || "currency unavailable"}
+          {masterAccount && masterAccount.current_status_demo !== "Active" ? " · simulated target-state account, not an active bank account" : ""}
+        </p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[1fr_1fr_0.9fr]">
-        <section className="space-y-3 rounded-sm border border-border bg-card p-3">
-          <h3 className="font-semibold">Source details</h3>
-          <label className="block">Source legal entity
-            <select value={sourceEntityId} onChange={(e) => { setSourceEntityId(e.target.value); setSourceAccountId(defaultSourceAccount(e.target.value)); }} className="mt-1 w-full rounded-sm border border-input bg-card px-2 py-1.5">
-              {entities.map((e) => <option key={e.entity_id} value={e.entity_id}>{e.entity_name_demo}</option>)}
-            </select>
-          </label>
-          <label className="block">Source bank account
-            <select value={sourceAccountId} onChange={(e) => setSourceAccountId(e.target.value)} className="mt-1 w-full rounded-sm border border-input bg-card px-2 py-1.5">
-              {accountsForEntity(sourceEntityId).map((a) => <option key={a.account_id} value={a.account_id}>{a.account_id} · {bankName(a.bank_id)} · {a.account_type} · {a.current_status_demo}</option>)}
-            </select>
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            <div><div className="eyebrow">Currency</div><div className="mt-1 font-semibold">{sourceCurrency || "—"}</div></div>
-            <div><div className="eyebrow">Available balance</div><div className="num mt-1 font-semibold">{sourceAccount ? fmtNative(availableBalance, sourceCurrency) : "—"}</div></div>
-          </div>
-          <div><div className="eyebrow">Required operating cash balance</div><div className="num mt-1 font-semibold">{sourceEntity ? fmtNative(operatingRequirement, sourceCurrency) : "—"}</div><p className="mt-1 text-muted-foreground">13-week forecast net outflow plus 20% buffer.</p></div>
-          {sourceErrors.length > 0 && <p className="text-danger" role="alert">{sourceErrors.join(" ")}</p>}
-        </section>
-
-        <section className="space-y-3 rounded-sm border border-border bg-card p-3">
-          <h3 className="font-semibold">Sweep amount and validation</h3>
-          <label className="block">Proposed sweep amount ({sourceCurrency || "native"}, native)
-            <input type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} aria-invalid={amountErrors.length > 0} className="num mt-1 w-full rounded-sm border border-input bg-card px-2 py-1.5" />
-          </label>
-          {amountErrors.length > 0 && <p className="text-danger" role="alert">{amountErrors.join(" ")}</p>}
-          <div className="rounded-sm border border-border bg-muted p-2">
-            <div className="eyebrow">Maximum eligible sweep</div>
-            <div className="num mt-1 font-semibold">{fmtNative(maximumSweep, sourceCurrency)}</div>
-            <div className="mt-1 text-muted-foreground">{fmtNative(availableBalance, sourceCurrency)} available − {fmtNative(operatingRequirement, sourceCurrency)} operating requirement</div>
-          </div>
-          <div>
-            <div className="eyebrow">Relevant currency pool</div>
-            <div className="mt-1 font-semibold">{sourcePool?.pool_name ?? "No configured pool"}</div>
-            {sourcePool && <p className="mt-1 text-muted-foreground">{sourcePool.currency} · {sourcePool.sweep_cadence}</p>}
-          </div>
-          <div className={`rounded-sm border p-2 ${sourceErrors.length || amountErrors.length ? "border-danger/30 bg-danger-soft text-danger" : "border-success/30 bg-success-soft text-success"}`} role="status">
-            <div className="font-semibold">{sourceErrors.length || amountErrors.length ? "Not eligible for submission" : "Validation passed"}</div>
-            <p className="mt-1">{sourceErrors.length || amountErrors.length ? [...sourceErrors, ...amountErrors].join(" ") : "Amount, source eligibility, same-currency pool, master account and restrictions are valid."}</p>
-          </div>
-        </section>
-
-        <section className="space-y-3 rounded-sm border-2 border-primary bg-accent p-3">
-          <div>
-            <h3 className="font-semibold">Automatic destination</h3>
-            <p className="mt-1 text-muted-foreground">Read-only · selected from the source currency pool</p>
-          </div>
-          <label className="block">Destination master account
-            <input readOnly value={masterAccount ? `${masterAccount.account_id} · ${bankName(masterAccount.bank_id)}` : "No valid master account configured"} className="mt-1 w-full rounded-sm border border-input bg-muted px-2 py-1.5 text-muted-foreground" />
-          </label>
-          <div><div className="eyebrow">Master legal entity</div><div className="mt-1 font-semibold">{masterEntity?.entity_name_demo ?? "—"}</div></div>
-          <div><div className="eyebrow">Currency</div><div className="mt-1 font-semibold">{masterAccount?.currency ?? "—"}</div></div>
-          <div><div className="eyebrow">Pool</div><div className="mt-1 font-semibold">{sourcePool?.pool_name ?? "—"}</div></div>
-          {!masterAccount && <p className="text-danger" role="alert">Submission is blocked because this pool has no matching active master account.</p>}
-        </section>
-      </div>
-
-      <div className="rounded-sm border border-border bg-card p-3">
-        <div className="eyebrow">Transaction summary</div>
-        <p className="mt-1">{sourceEntity?.entity_name_demo ?? "—"} · {sourceAccount?.account_id ?? "No source account"} → {masterAccount?.account_id ?? "No master account"} · {amountValue > 0 ? fmtNative(amountValue, sourceCurrency) : "Amount not entered"} · {sourceCurrency || "—"} · {sourcePool?.pool_name ?? "No pool"}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
+      {sourceErrors.length > 0 && <p className="text-danger" role="alert">{sourceErrors.join(" ")}</p>}
+      <div className="flex flex-wrap items-center gap-2">
         <Btn variant="ink" disabled={!canSubmit} onClick={submitSweep}>Submit Sweep for Review</Btn>
-        <span className="text-muted-foreground">Submission creates a pending proposal; it does not deduct cash or execute the sweep.</span>
+        <span className="text-muted-foreground">No money moves until approved and executed.</span>
       </div>
     </div>
   );
