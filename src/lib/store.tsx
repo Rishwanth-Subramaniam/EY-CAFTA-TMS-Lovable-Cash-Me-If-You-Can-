@@ -26,7 +26,7 @@ type State = {
   seq: number;
 };
 
-const now = () => "2026-10-17 " + new Date().toTimeString().slice(0, 5) + " IST (demo)";
+const now = () => new Date().toISOString();
 const SWEEP_REVIEWER = "Middle Office Reviewer (independent)";
 const LOAN_REVIEWER = "Middle Office Reviewer (independent)";
 
@@ -81,13 +81,14 @@ type Action =
   | { type: "status"; id: string; status: string; actor: string; reason: string; policy?: string }
   | { type: "approve"; id: string; role: string; actor?: string; decision: "Approved" | "Rejected" }
   | { type: "failSweep"; id: string }
-  | { type: "exception"; id: string; status: string; actor: string };
+  | { type: "exception"; id: string; status: string; actor: string; comment?: string };
 
 function reducer(s: State, a: Action): State {
-  const audit = (obj: string, action: string, actor: string, oldS: string, newS: string, reason: string, policy = "") => ({
+  const audit = (obj: string, action: string, actor: string, oldS: string, newS: string, reason: string, policy = "", linkedTransactionId = "") => ({
     audit_id: `AUD-${9000 + s.audit.length + 1}`,
     timestamp_demo: now(),
     linked_object_id: obj,
+    linked_transaction_id: linkedTransactionId || obj,
     action,
     actor_role_demo: actor,
     old_state: oldS,
@@ -245,10 +246,33 @@ function reducer(s: State, a: Action): State {
     }
     case "exception": {
       const e = s.exceptions.find((x) => x.exception_id === a.id)!;
+      const comment = a.comment?.trim();
       return {
         ...s,
-        exceptions: s.exceptions.map((x) => (x.exception_id === a.id ? { ...x, status_demo: a.status } : x)),
-        audit: [audit(a.id, "Exception updated", a.actor, e.status_demo, a.status, "Investigation step (simulated)", e.policy_id), ...s.audit],
+        exceptions: s.exceptions.map((x) =>
+          x.exception_id === a.id
+            ? {
+                ...x,
+                status_demo: a.status,
+                last_reviewer_comment: comment || x.last_reviewer_comment || "",
+                last_action_by: a.actor,
+                last_action_timestamp_demo: now(),
+              }
+            : x,
+        ),
+        audit: [
+          audit(
+            a.id,
+            "Exception updated",
+            a.actor,
+            e.status_demo,
+            a.status,
+            [comment ? `Reviewer comment / corrective action: ${comment}` : "No reviewer comment provided.", e.next_action ? `Next action: ${e.next_action}` : ""].filter(Boolean).join(" "),
+            e.policy_id,
+            e.linked_transaction_id,
+          ),
+          ...s.audit,
+        ],
       };
     }
   }

@@ -1,16 +1,26 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { PageHeader, Panel, Status, Metric, Btn, Select, Note } from "@/components/ui-kit";
-import { accounts, bankName, entityName, fmtInr, fmtNative, policyById, toInr } from "@/lib/data";
+import { accounts, bankName, entityName, fmtInr, fmtNative, policyById } from "@/lib/data";
 import { useStore } from "@/lib/store";
+
+const auditTimestampKey = (timestamp?: string) => {
+  const match = timestamp?.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  return match ? `${match[1]}T${match[2] ?? "00:00"}` : "";
+};
+
+const localDatetimeKey = (date: Date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+};
 
 export const Route = createFileRoute("/risk")({
   head: () => ({
     meta: [
       { title: "Risk & Compliance — Project Sangam" },
-      { name: "description", content: "Policy compliance monitor, exceptions queue, approvals and audit trail (simulated)." },
+      { name: "description", content: "Treasury exceptions and illustrative transaction audit history." },
       { property: "og:title", content: "Risk & Compliance — Project Sangam" },
-      { property: "og:description", content: "Maker, checker and sanctions screening on every payment." },
+      { property: "og:description", content: "Review flagged treasury transactions and the available audit history." },
     ],
   }),
   component: Risk,
@@ -20,15 +30,21 @@ function Risk() {
   const { state, dispatch } = useStore();
   const [sev, setSev] = useState("ALL");
   const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
-  const [quickView, setQuickView] = useState("ALL");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [typeFilter, setTypeFilter] = useState("ALL");
-  const [entityFilter, setEntityFilter] = useState("ALL");
-  const [currencyFilter, setCurrencyFilter] = useState("ALL");
-  const [ownerFilter, setOwnerFilter] = useState("ALL");
+  const [exceptionComments, setExceptionComments] = useState<Record<string, string>>({});
+  const [auditDateRange, setAuditDateRange] = useState("LAST_30_DAYS");
+  const [auditStartDate, setAuditStartDate] = useState("");
+  const [auditEndDate, setAuditEndDate] = useState("");
+  const [auditInitiator, setAuditInitiator] = useState("ALL");
+  const [auditType, setAuditType] = useState("ALL");
+  const [auditIssueStatus, setAuditIssueStatus] = useState("ALL");
   const blocked = state.txns.filter((t) => /blocked/i.test(t.status));
   const paymentTransactionIds = new Set(
     state.txns.filter((t) => /payment/i.test(t.transaction_type)).map((t) => t.transaction_id),
+  );
+  const paymentExceptionIds = new Set(
+    state.exceptions
+      .filter((exception) => paymentTransactionIds.has(exception.linked_transaction_id))
+      .map((exception) => exception.exception_id),
   );
   const exc = state.exceptions.filter(
     (e) =>
@@ -70,49 +86,230 @@ function Risk() {
     return "The control exception means the transaction should be checked against its supporting evidence and applicable policy before a decision is recorded.";
   };
 
-  const approvalRows = useMemo(() => {
-    return state.approvals.flatMap((a) => {
-      const txn = state.txns.find((t) => t.transaction_id === a.transaction_id);
-      if ((txn && /payment/i.test(txn.transaction_type)) || /payment/i.test(a.approval_type)) return [];
-      const status = a.status_demo || "Pending";
+  const auditEntries = useMemo(() => {
+    const transactionsById = new Map(state.txns.map((txn) => [txn.transaction_id, txn]));
+    const transactionEvents = state.txns
+      .filter((txn) => !/payment/i.test(txn.transaction_type))
+      .map((txn) => ({
+      auditId: `snapshot-${txn.transaction_id}`,
+      timestamp: txn.submitted_timestamp_demo ?? txn.created_timestamp_demo ?? txn.created_at_demo ?? "",
+      transactionId: txn.transaction_id,
+      transaction: txn,
+      action: "Transaction record",
+      actor: txn.initiator ?? (
+        txn.is_intercompany_loan_request || /intercompany loan/i.test(txn.transaction_type)
+          ? "Requesting legal entity / local finance"
+          : /bank-run|system/i.test(txn.transaction_type)
+            ? "System-generated action"
+            : "Front Office"
+      ),
+      oldState: "—",
+      newState: txn.status ?? "Status not recorded",
+      reason: txn.decision_rationale ?? "No rationale recorded.",
+      detail: `${txn.required_control ?? "Control not recorded"}${txn.execution_note ? ` · ${txn.execution_note}` : ""}`,
+      isSystemAction: /bank-run|system/i.test(txn.transaction_type) || /system/i.test(txn.initiator ?? ""),
+      }));
+    const actionEvents = state.audit
+      .filter((entry) =>
+        !paymentTransactionIds.has(entry.linked_transaction_id ?? entry.linked_object_id) &&
+        !paymentExceptionIds.has(entry.linked_object_id),
+      )
+      .map((entry) => {
+        const transactionId = entry.linked_transaction_id ?? entry.linked_object_id;
+        const transaction = transactionsById.get(transactionId);
+        return {
+          auditId: entry.audit_id,
+          timestamp: entry.timestamp_demo ?? "",
+          transactionId,
+          transaction,
+          action: entry.action ?? "Treasury action",
+          actor: entry.actor_role_demo ?? "Not recorded",
+          oldState: entry.old_state ?? "—",
+          newState: entry.new_state ?? "—",
+          reason: entry.reason ?? "No details recorded.",
+          detail: entry.policy_id ? `Policy/control: ${entry.policy_id}` : "",
+          isSystemAction: /system|rule engine|screening/i.test(entry.actor_role_demo ?? ""),
+        };
+      });
+    const approvalEvents = state.approvals.flatMap((approval) => {
+      const transaction = transactionsById.get(approval.transaction_id);
+      if (
+        (transaction && /payment/i.test(transaction.transaction_type)) ||
+        /payment/i.test(approval.approval_type)
+      ) return [];
       return [{
-        ...a,
-        txn,
-        entity: txn ? entityName(txn.from_entity_id) : "—",
-        currency: txn?.currency ?? "—",
-        amount: txn ? fmtNative(txn.amount_native, txn.currency) : "—",
-        amountInr: txn ? fmtInr(toInr(txn.amount_native, txn.currency)) : "—",
-        status,
-        owner: a.approver_role,
-        updated: a.timestamp_demo || "Pending",
+        auditId: `approval-${approval.approval_id}`,
+        timestamp: approval.timestamp_demo || transaction?.submitted_timestamp_demo || transaction?.created_timestamp_demo || transaction?.created_at_demo || "",
+        transactionId: approval.transaction_id,
+        transaction,
+        action: `Approval step · ${approval.approval_type}`,
+        actor: approval.approver_role ?? "Not recorded",
+        oldState: "—",
+        newState: approval.status_demo ?? "Pending",
+        reason: approval.rationale_or_requirement ?? approval.execution_note ?? "Approval status recorded.",
+        detail: approval.segregation_of_duties_check ?? "",
+        isSystemAction: /system|screening service/i.test(approval.approver_role ?? ""),
       }];
     });
-  }, [state.approvals, state.txns]);
-
-  const approvalTypes = ["ALL", ...new Set(approvalRows.map((row) => row.txn?.transaction_type ?? "Other"))];
-  const approvalStatuses = ["ALL", ...new Set(approvalRows.map((row) => row.status))];
-  const approvalEntities = ["ALL", ...new Set(approvalRows.map((row) => row.entity))];
-  const approvalCurrencies = ["ALL", ...new Set(approvalRows.map((row) => row.currency))];
-  const approvalOwners = ["ALL", ...new Set(approvalRows.map((row) => row.owner))];
-  const filteredApprovals = approvalRows.filter((row) => {
-    const matchesQuickView =
-      quickView === "ALL" ||
-      (quickView === "PENDING" && /pending/i.test(row.status)) ||
-      (quickView === "FAILED" && /failed|blocked|reject/i.test(row.status || "") ) ||
-      (quickView === "RESOLVED" && /approved|resolved|reconciled|executed/i.test(row.status || "")) ||
-      (quickView === "RECENT" && /approved|reconciled|executed/i.test(row.status || ""));
-    const matchesStatus = statusFilter === "ALL" || row.status === statusFilter;
-    const matchesType = typeFilter === "ALL" || row.txn?.transaction_type === typeFilter;
-    const matchesEntity = entityFilter === "ALL" || row.entity === entityFilter;
-    const matchesCurrency = currencyFilter === "ALL" || row.currency === currencyFilter;
-    const matchesOwner = ownerFilter === "ALL" || row.owner === ownerFilter;
-    return matchesQuickView && matchesStatus && matchesType && matchesEntity && matchesCurrency && matchesOwner;
+    const exceptionEvents = state.exceptions.flatMap((exception) => {
+      if (
+        paymentTransactionIds.has(exception.linked_transaction_id) ||
+        /payment/i.test(exception.exception_type)
+      ) return [];
+      const transaction = transactionsById.get(exception.linked_transaction_id);
+      return [{
+        auditId: `exception-${exception.exception_id}`,
+        timestamp: exception.last_action_timestamp_demo ?? exception.detected_timestamp_demo ?? "",
+        transactionId: exception.linked_transaction_id ?? exception.exception_id,
+        transaction,
+        action: `Exception status record · ${exception.exception_type}`,
+        actor: exception.last_action_by ?? exception.owner_role ?? "Not recorded",
+        oldState: "—",
+        newState: exception.status_demo ?? "Status not recorded",
+        reason: exception.last_reviewer_comment
+          ? `Reviewer comment / corrective action: ${exception.last_reviewer_comment}`
+          : exception.reason ?? "No reason recorded.",
+        detail: `Assigned team: ${exception.owner_role ?? "Not recorded"} · Next action: ${exception.next_action ?? "Not recorded"} · SLA: ${exception.sla_or_deadline_demo ?? "Not recorded"}`,
+        isSystemAction: false,
+      }];
+    });
+    return [...transactionEvents, ...actionEvents, ...approvalEvents, ...exceptionEvents]
+      .map((entry) => {
+        const transaction = entry.transaction;
+        const rawType = transaction?.transaction_type ?? "";
+        const type = /sweep/i.test(rawType)
+          ? "Cash sweep"
+          : /transfer/i.test(rawType)
+            ? "Cash transfer"
+            : /intercompany loan/i.test(rawType)
+              ? "Intercompany loan"
+              : /repay/i.test(rawType)
+                ? "Loan repayment"
+                : /investment|deposit/i.test(rawType)
+                  ? "Investment / deposit"
+                  : "Other treasury actions";
+        const initiator = transaction?.initiator ??
+          (transaction?.is_intercompany_loan_request || /intercompany loan/i.test(rawType)
+            ? "Requesting legal entity / local finance"
+            : /bank-run|system/i.test(rawType)
+              ? "System-generated action"
+              : "Front Office");
+        const initiatorCategory = entry.isSystemAction || /system-generated|system rule engine/i.test(initiator)
+          ? "System-generated action"
+          : /requesting legal entity|local finance/i.test(initiator) || /intercompany loan/i.test(rawType)
+            ? "Requesting legal entity / local finance"
+            : /front office|treasury analyst|maker/i.test(initiator)
+              ? "Front Office"
+              : initiator;
+        const issueStatus = /failed/i.test(`${entry.newState} ${entry.action}`)
+          ? "Failed execution"
+          : /blocked/i.test(`${entry.newState} ${entry.action}`)
+            ? "Blocked by policy"
+            : /limit exceeded/i.test(`${entry.newState} ${entry.reason}`)
+              ? "Limit exceeded"
+              : /investigat/i.test(entry.newState)
+                ? "Under investigation"
+                : /pending|needs information|validation required|awaiting|not recorded/i.test(entry.newState)
+                  ? "Missing information or approval"
+                  : /open|corrective|next action/i.test(`${entry.newState} ${entry.detail}`)
+                    ? "Awaiting corrective action"
+                    : "None";
+        return { ...entry, type, initiator, initiatorCategory, issueStatus };
+      })
+      .sort((a, b) => auditTimestampKey(b.timestamp).localeCompare(auditTimestampKey(a.timestamp)));
+  }, [paymentExceptionIds, paymentTransactionIds, state.approvals, state.audit, state.exceptions, state.txns]);
+  const namedInitiators = [...new Set(auditEntries.map((entry) => entry.initiator).filter(Boolean))];
+  const namedUsers = namedInitiators.filter((name) =>
+    !["Front Office", "Requesting legal entity / local finance", "System-generated action"].includes(name) &&
+    !/front office|treasury analyst|maker|middle office|reviewer|treasury operations/i.test(name),
+  );
+  const auditInitiatorOptions = [
+    { value: "ALL", label: "All initiators" },
+    { value: "CATEGORY:Front Office", label: "Front Office" },
+    { value: "CATEGORY:Requesting legal entity / local finance", label: "Requesting legal entity / local finance" },
+    { value: "CATEGORY:System-generated action", label: "System-generated action" },
+    ...namedUsers.map((name) => ({ value: `USER:${name}`, label: name })),
+  ];
+  const auditTypeOptions = [
+    "ALL",
+    "Cash sweep",
+    "Cash transfer",
+    "Intercompany loan",
+    "Loan repayment",
+    "Investment / deposit",
+    "Other treasury actions",
+  ].map((value) => ({ value, label: value === "ALL" ? "All transaction types" : value }));
+  const auditIssueOptions = [
+    "ALL",
+    "Failed execution",
+    "Blocked by policy",
+    "Missing information or approval",
+    "Limit exceeded",
+    "Under investigation",
+    "Awaiting corrective action",
+  ].map((value) => ({ value, label: value === "ALL" ? "All statuses" : value }));
+  const today = localDatetimeKey(new Date()).slice(0, 10);
+  const rangeStart = auditDateRange === "TODAY"
+    ? `${today}T00:00`
+    : auditDateRange === "LAST_7_DAYS"
+      ? `${localDatetimeKey(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)).slice(0, 10)}T00:00`
+      : auditDateRange === "LAST_30_DAYS"
+        ? `${localDatetimeKey(new Date(Date.now() - 29 * 24 * 60 * 60 * 1000)).slice(0, 10)}T00:00`
+        : auditStartDate;
+  const rangeEnd = auditDateRange === "CUSTOM" ? auditEndDate || localDatetimeKey(new Date()) : localDatetimeKey(new Date());
+  const filteredAuditEntries = auditEntries.filter((entry) => {
+    const timestamp = auditTimestampKey(entry.timestamp);
+    const initiatorMatches = auditInitiator === "ALL" ||
+      (auditInitiator.startsWith("CATEGORY:")
+        ? entry.initiatorCategory === auditInitiator.slice("CATEGORY:".length)
+        : auditInitiator.startsWith("USER:")
+          ? entry.initiator === auditInitiator.slice(5)
+          : true);
+    return (
+      (auditDateRange === "ALL" || (Boolean(timestamp) && (!rangeStart || timestamp >= rangeStart) && (!rangeEnd || timestamp <= rangeEnd))) &&
+      initiatorMatches &&
+      (auditType === "ALL" || entry.type === auditType) &&
+      (auditIssueStatus === "ALL" || entry.issueStatus === auditIssueStatus)
+    );
   });
-  const auditRows = state.audit.filter((row) => !paymentTransactionIds.has(row.linked_object_id));
+  const workflowFor = (entry: (typeof auditEntries)[number]) => {
+    const status = entry.transaction?.status ?? entry.newState;
+    if (/intercompany loan/i.test(entry.type)) {
+      return /executed|reconciled/i.test(status)
+        ? "Request → Middle Office review → bank instruction to pool master → execution confirmed → accounting/credit-line update review."
+        : /approved/i.test(status)
+          ? "Request → Middle Office credit/eligibility review → bank instruction to pool master → awaiting bank execution confirmation."
+          : "Request → Middle Office credit/eligibility review → approval → bank instruction to pool master → bank execution and accounting confirmation.";
+    }
+    if (/sweep/i.test(entry.type)) {
+      return /failed|blocked/i.test(status)
+        ? "Pool/source validation → authorised review → execution exception → investigate bank response → correct or escalate; no silent retry."
+        : /executed|reconciled/i.test(status)
+          ? "Pool/source validation → required independent review → authorised execution → statement reconciliation."
+          : "Pool/source validation → required independent review → authorised execution → statement reconciliation.";
+    }
+    if (/transfer/i.test(entry.type)) {
+      return "Policy and route validation → maker/checker and screening → required independent approval → execution → reconciliation.";
+    }
+    if (/investment/i.test(entry.type)) {
+      return "Counterparty and limit evidence → independent approval → placement → confirmation and reconciliation.";
+    }
+    return "Review supporting evidence and applicable control → obtain required approval → execute through authorised process → reconcile.";
+  };
+  const updateException = (exceptionId: string, status: string, actor: string) => {
+    dispatch({
+      type: "exception",
+      id: exceptionId,
+      status,
+      actor,
+      comment: exceptionComments[exceptionId],
+    });
+    setExceptionComments((current) => ({ ...current, [exceptionId]: "" }));
+  };
 
   return (
     <>
-      <PageHeader n={5} title="Risk & Compliance" sub="Every payment needs a maker, an independent checker and sanctions screening. Anomaly flags inform humans; they never approve, release or stop payments." about="Use this screen to monitor payment controls, open exceptions, approval status and the policy-backed decision trail. The actionable queue makes it easy to find pending approvals, failed sweeps and resolved flows without searching through the entire transaction register." />
+      <PageHeader n={5} title="Risk & Compliance" sub="Review treasury exceptions, the transaction workflow, and the available event history. All records are illustrative." about="Use this screen to investigate flagged treasury transactions and review recorded changes, responsible actors, statuses, supporting reasons, and next steps. The audit history contains only the prototype's available demo records and current-session events." />
       <div className="grid grid-cols-2 gap-3">
         <Metric accent label="Flagged Transactions" value={open.length} />
         <Metric label="Blocked by policy" value={blocked.length} sub="Count-based" />
@@ -126,8 +323,8 @@ function Risk() {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel id="exceptions" title="Flagged Transactions Queue" actions={<Select label="Severity" value={sev} onChange={setSev} options={["ALL", "High", "Medium", "Low"].map((v) => ({ value: v, label: v }))} />}>
+      <div id="exceptions" className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Panel title="Flagged Transactions Queue" actions={<Select label="Severity" value={sev} onChange={setSev} options={["ALL", "High", "Medium", "Low"].map((v) => ({ value: v, label: v }))} />}>
           <ul className="max-h-[36rem] space-y-2 overflow-auto text-xs">
             {exc.map((e) => (
               <li key={e.exception_id} className={`rounded-sm border p-3 ${selectedException?.exception_id === e.exception_id ? "border-primary bg-accent" : "border-border"}`}>
@@ -137,13 +334,22 @@ function Risk() {
                 </div>
                 <p className="mt-1">{e.reason}</p>
                 <p className="text-muted-foreground">Next: {e.next_action} · Owner: {e.owner_role} · SLA: {e.sla_or_deadline_demo}</p>
+                <label className="mt-2 block text-muted-foreground">Reviewer comment, escalation, or corrective action
+                  <textarea
+                    value={exceptionComments[e.exception_id] ?? ""}
+                    onChange={(event) => setExceptionComments((current) => ({ ...current, [e.exception_id]: event.target.value }))}
+                    rows={2}
+                    className="mt-1 w-full rounded-sm border border-input bg-card px-2 py-1.5 text-foreground"
+                    placeholder="Record evidence reviewed, escalation, owner hand-off, or resolution details"
+                  />
+                </label>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Btn variant="outline" onClick={() => setSelectedExceptionId(e.exception_id)}>
                     {selectedException?.exception_id === e.exception_id ? "Viewing details" : "View details"}
                   </Btn>
                   {e.linked_transaction_id && <Link to="/pools" search={{ tx: e.linked_transaction_id }} className="underline">{e.linked_transaction_id}</Link>}
-                  {/open/i.test(e.status_demo) && <Btn onClick={() => dispatch({ type: "exception", id: e.exception_id, status: "Under investigation", actor: "Treasury Operations" })}>Start investigation</Btn>}
-                  {!/resolved/i.test(e.status_demo) && <Btn variant="ink" onClick={() => dispatch({ type: "exception", id: e.exception_id, status: "Resolved (simulated)", actor: "Treasury Manager" })}>Mark resolved</Btn>}
+                  {/open/i.test(e.status_demo) && <Btn onClick={() => updateException(e.exception_id, "Under investigation", "Treasury Operations")}>Start investigation</Btn>}
+                  {!/resolved/i.test(e.status_demo) && <Btn variant="ink" onClick={() => updateException(e.exception_id, "Resolved (simulated)", "Group Treasurer")}>Mark resolved</Btn>}
                 </div>
               </li>
             ))}
@@ -203,62 +409,66 @@ function Risk() {
         </Panel>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel title="Approvals register" note="Simulated approvals — not real sign-offs" actions={
-          <div className="flex flex-wrap gap-2">
-            {[
-              ["ALL", "All actions"],
-              ["PENDING", "Pending approvals"],
-              ["FAILED", "Failed sweeps"],
-              ["RESOLVED", "Resolved actions"],
-              ["RECENT", "Recently approved"],
-            ].map(([key, label]) => (
-              <button key={key} onClick={() => setQuickView(key)} className={quickView === key ? "rounded-sm bg-primary px-2 py-1 text-[0.7rem] font-semibold text-primary-foreground" : "rounded-sm border border-border px-2 py-1 text-[0.7rem] text-muted-foreground hover:bg-muted"}>{label}</button>
-            ))}
-          </div>
-        }>
-          <div className="mb-3 flex flex-wrap gap-2">
-            <Select label="Status" value={statusFilter} onChange={setStatusFilter} options={approvalStatuses.map((v) => ({ value: v, label: v }))} />
-            <Select label="Type" value={typeFilter} onChange={setTypeFilter} options={approvalTypes.map((v) => ({ value: v, label: v }))} />
-            <Select label="Entity" value={entityFilter} onChange={setEntityFilter} options={approvalEntities.map((v) => ({ value: v, label: v }))} />
-            <Select label="Currency" value={currencyFilter} onChange={setCurrencyFilter} options={approvalCurrencies.map((v) => ({ value: v, label: v }))} />
-            <Select label="Owner" value={ownerFilter} onChange={setOwnerFilter} options={approvalOwners.map((v) => ({ value: v, label: v }))} />
-            <button onClick={() => { setQuickView("ALL"); setStatusFilter("ALL"); setTypeFilter("ALL"); setEntityFilter("ALL"); setCurrencyFilter("ALL"); setOwnerFilter("ALL"); }} className="rounded-sm border border-border px-2 py-1.5 text-[0.7rem] font-semibold text-foreground hover:bg-muted">Clear filters</button>
-          </div>
-          <div className="max-h-[22rem] overflow-auto">
-            <table className="data-table">
-              <thead><tr><th>ID</th><th>Action</th><th>Entity</th><th>Currency</th><th>Amount</th><th>Status</th><th>Owner</th><th>Last updated</th><th>Link</th></tr></thead>
-              <tbody>
-                {filteredApprovals.map((row) => (
-                  <tr key={row.approval_id}>
-                    <td className="num">{row.approval_id}</td>
-                    <td>
-                      <div className="font-medium">{row.approval_type}</div>
-                      <div className="text-muted-foreground">{row.txn?.transaction_type ?? "—"}</div>
-                    </td>
-                    <td>{row.entity}</td>
-                    <td className="num">{row.currency}</td>
-                    <td className="num">{row.amount}</td>
-                    <td><Status>{row.status}</Status></td>
-                    <td>{row.owner}</td>
-                    <td className="num">{row.updated}</td>
-                    <td><Link to="/pools" search={{ tx: row.transaction_id }} className="underline">View</Link></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-        <Panel title="Audit trail" note="Shows the History of Transactions">
-          <div className="max-h-96 overflow-auto">
-            <table className="data-table">
-              <thead><tr><th>Time</th><th>Object</th><th>Action</th><th>Actor</th><th>Change</th></tr></thead>
-              <tbody>{auditRows.map((a) => <tr key={a.audit_id + a.timestamp_demo}><td className="num whitespace-nowrap">{a.timestamp_demo}</td><td className="num">{a.linked_object_id}</td><td>{a.action}<div className="text-muted-foreground">{a.reason}</div></td><td>{a.actor_role_demo}</td><td>{a.old_state} → {a.new_state}</td></tr>)}</tbody>
-            </table>
-          </div>
-        </Panel>
-      </div>
-      <Note>Maker and checker must be different people (segregation of duties). Sanctions screening is a simulated check; no real screening service is connected.</Note>
+      <Panel className="mt-4 w-full" title="Audit trail" note="Shows the History of Transactions">
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <Select
+            label="Date and time range"
+            value={auditDateRange}
+            onChange={setAuditDateRange}
+            options={[
+              { value: "ALL", label: "All available history" },
+              { value: "TODAY", label: "Today" },
+              { value: "LAST_7_DAYS", label: "Last 7 days" },
+              { value: "LAST_30_DAYS", label: "Last 30 days" },
+              { value: "CUSTOM", label: "Custom range" },
+            ]}
+          />
+          {auditDateRange === "CUSTOM" && (
+            <>
+              <label className="block text-xs">From
+                <input type="datetime-local" value={auditStartDate} onChange={(event) => setAuditStartDate(event.target.value)} className="mt-1 block rounded-sm border border-input bg-card px-2 py-1.5" />
+              </label>
+              <label className="block text-xs">To
+                <input type="datetime-local" value={auditEndDate} onChange={(event) => setAuditEndDate(event.target.value)} className="mt-1 block rounded-sm border border-input bg-card px-2 py-1.5" />
+              </label>
+            </>
+          )}
+          <Select label="Initiated by" value={auditInitiator} onChange={setAuditInitiator} options={auditInitiatorOptions} />
+          <Select label="Transaction type" value={auditType} onChange={setAuditType} options={auditTypeOptions} />
+          <Select label="Exception / failure status" value={auditIssueStatus} onChange={setAuditIssueStatus} options={auditIssueOptions} />
+        </div>
+        <div className="max-h-[44rem] overflow-auto">
+          <table className="data-table min-w-[1500px]">
+            <thead><tr><th>Date / time</th><th>Transaction</th><th>Type</th><th>Initiated by</th><th>Action / actor</th><th>Event change</th><th>Current status</th><th>Details / reason</th><th>Workflow / next step</th></tr></thead>
+            <tbody>
+              {filteredAuditEntries.map((entry) => (
+                <tr key={entry.auditId}>
+                  <td className="num whitespace-nowrap">{entry.timestamp || "Timestamp not recorded"}</td>
+                  <td>
+                    {entry.transaction ? (
+                      <Link to="/pools" search={{ tx: entry.transactionId }} className="num font-semibold underline">{entry.transactionId}</Link>
+                    ) : <span className="num">{entry.transactionId}</span>}
+                    {entry.transaction && <div className="text-muted-foreground">{entityName(entry.transaction.from_entity_id)} → {entityName(entry.transaction.to_entity_id)}</div>}
+                    {entry.transaction && /intercompany loan/i.test(entry.transaction.transaction_type) && <div className="text-muted-foreground">Requesting entity: {entityName(entry.transaction.borrowing_entity_id ?? entry.transaction.to_entity_id)}</div>}
+                    {entry.transaction && <div className="num text-muted-foreground">{fmtNative(entry.transaction.amount_native, entry.transaction.currency)}</div>}
+                    {entry.transaction?.from_account_id && <div className="text-muted-foreground">From: {accountLabel(entry.transaction.from_account_id)}</div>}
+                    {entry.transaction?.to_account_id && <div className="text-muted-foreground">To: {accountLabel(entry.transaction.to_account_id)}</div>}
+                  </td>
+                  <td>{entry.type}</td>
+                  <td>{entry.initiator}</td>
+                  <td>{entry.action}<div className="text-muted-foreground">{entry.actor}</div></td>
+                  <td>{entry.oldState} → {entry.newState}</td>
+                  <td><Status>{entry.transaction?.status ?? entry.newState}</Status></td>
+                  <td className="min-w-[18rem]">{entry.reason}<div className="mt-1 text-muted-foreground">{entry.detail}</div></td>
+                  <td className="min-w-[22rem]">{workflowFor(entry)}</td>
+                </tr>
+              ))}
+              {filteredAuditEntries.length === 0 && <tr><td colSpan={9} className="text-center text-muted-foreground">No audit events match the selected filters or date range.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <Note>This prototype shows the available illustrative dataset and events in the current in-memory session. It is not connected to a live TMS or a persistent company-wide historical audit store; missing historical records or user identities are not invented.</Note>
+      </Panel>
     </>
   );
 }
