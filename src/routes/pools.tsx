@@ -1,9 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { PageHeader, Panel, Status, Btn, Select, Note } from "@/components/ui-kit";
+import { PageHeader, Panel, Status, Select, Note } from "@/components/ui-kit";
 import { pools, bankName, entityName, fmtNative, fmtInr, toInr, FRONT_OFFICE_THRESHOLD_INR, policyById } from "@/lib/data";
-import { useStore, validate, LIFECYCLE, requiredControls } from "@/lib/store";
+import { useStore, LIFECYCLE, requiredControls } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/pools")({
@@ -11,9 +11,9 @@ export const Route = createFileRoute("/pools")({
   head: () => ({
     meta: [
       { title: "Cash Pools & Transfers — Project Sangam" },
-      { name: "description", content: "Pools, transaction work queue, approvals, simulated execution, reconciliation and intercompany ledger." },
+      { name: "description", content: "Read-only transaction work queue, pool status and intercompany ledger." },
       { property: "og:title", content: "Cash Pools & Transfers — Project Sangam" },
-      { property: "og:description", content: "Guided transfer lifecycle with maker-checker controls (simulated)." },
+      { property: "og:description", content: "Review submitted treasury proposals and their current status. Workflow actions are handled outside this screen." },
     ],
   }),
   component: Pools,
@@ -31,7 +31,7 @@ const stageIndex = (s: string) => {
 function Pools() {
   const { tx } = Route.useSearch();
   const navigate = useNavigate({ from: "/pools" });
-  const { state, dispatch } = useStore();
+  const { state } = useStore();
   const [filter, setFilter] = useState("ALL");
   const t = state.txns.find((x) => x.transaction_id === tx);
   const loanRequest = Boolean(
@@ -46,15 +46,9 @@ function Pools() {
   const linkedExceptions = state.exceptions.filter((e) => e.linked_transaction_id === t?.transaction_id);
   const issueSummary = blocked ? (t?.decision_rationale ?? "Transaction is blocked and needs a human decision.") : linkedExceptions.length > 0 ? linkedExceptions[0].reason : "No issue recorded — the transaction is progressing normally.";
 
-  const runValidation = () => {
-    if (!t) return;
-    const v = validate(t);
-    dispatch({ type: "status", id: t.transaction_id, status: v.ok ? "Validated (simulated)" : "Blocked by policy", actor: "System rule engine", reason: v.ok ? "Same-currency, pool eligibility, cadence and restriction checks passed (simulated)." : v.reasons.join(" "), policy: v.ok ? "POL-POOL-01" : "POL-POOL-01;POL-IN-01" });
-  };
-
   return (
     <>
-      <PageHeader n={3} title="Cash Pools & Transfers" sub="Continue proposals started on Screen 2 through validation, approvals, simulated execution and reconciliation. Bank-configured sweeps appear as simulated automated events." about="This is the work queue for every proposed transfer or sweep. Review the lifecycle state, required controls, failure reason and available next step before moving a transaction to approval or reconciliation." />
+      <PageHeader n={3} title="Cash Pools & Transfers" sub="Read-only register of treasury proposals and their current workflow status. Approvals, execution and reconciliation are not performed on this screen." about="Review submitted proposals, their details and status. This screen does not provide controls to approve, reject, validate, execute or reconcile transactions." />
 
       <Panel title="Pools and currency groups" note="Primary active headers: EUR at HSBC Netherlands, USD at Citi USA, INR at the existing Indian partner bank. Standby accounts are not pool masters.">
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
@@ -70,7 +64,7 @@ function Pools() {
       </Panel>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
-        <Panel title="Transaction work queue" actions={<Select label="Show" value={filter} onChange={setFilter} options={[{ value: "ALL", label: "All" }, { value: "OPEN", label: "In progress" }, { value: "BLOCKED", label: "Blocked / failed" }, { value: "DONE", label: "Executed / reconciled" }]} />}>
+        <Panel title="Transaction work queue" note="Read-only · review proposal details and current status" actions={<Select label="Show" value={filter} onChange={setFilter} options={[{ value: "ALL", label: "All" }, { value: "OPEN", label: "In progress" }, { value: "BLOCKED", label: "Blocked / failed" }, { value: "DONE", label: "Executed / reconciled" }]} />}>
           <div className="max-h-[560px] overflow-auto">
             <table className="data-table">
               <thead><tr><th>ID</th><th>Type</th><th>From → To</th><th>Amount (native)</th><th>Status</th></tr></thead>
@@ -143,32 +137,26 @@ function Pools() {
               </div>
               {txApprovals.length > 0 && (
                 <>
-                  {t.is_sweep_proposal && <p className="font-semibold">Only the authorised independent reviewer assigned to each step can approve or reject. The initiator cannot approve this sweep.</p>}
+                  <p className="font-semibold">Approval steps and statuses are shown for reference only. Review decisions are handled outside this screen.</p>
                   {loanRequest && <p className="font-semibold">View-only request record. Approval and bank execution are not performed in this work queue.</p>}
                   <table className="data-table">
-                    <thead><tr><th>Step</th><th>Role</th><th>Status</th>{!loanRequest && <th></th>}</tr></thead>
+                    <thead><tr><th>Step</th><th>Role</th><th>Status</th></tr></thead>
                     <tbody>
                       {txApprovals.map((a) => (
                         <tr key={a.approval_id}>
                           <td>{a.approval_type}<div className="text-muted-foreground">{a.segregation_of_duties_check}</div></td>
                           <td>{a.approver_role}</td>
                           <td><Status>{a.status_demo}</Status></td>
-                          {!loanRequest && <td className="whitespace-nowrap">{a.status_demo === "Pending" && !blocked && (<><Btn onClick={() => dispatch({ type: "approve", id: t.transaction_id, role: a.approval_type, actor: t.is_sweep_proposal ? a.approver_role : a.approval_type, decision: "Approved" })}>Approve</Btn> <Btn variant="danger" onClick={() => dispatch({ type: "approve", id: t.transaction_id, role: a.approval_type, actor: t.is_sweep_proposal ? a.approver_role : a.approval_type, decision: "Rejected" })}>Reject</Btn></>)}</td>}
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </>
               )}
-              {!loanRequest && <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-                {stageIndex(t.status) === 0 && !blocked && <Btn variant="ink" onClick={runValidation}>Run validation</Btn>}
-                {(stageIndex(t.status) === 1 || (stageIndex(t.status) === 2 && txApprovals.length === 0)) && <Btn variant="ink" onClick={() => dispatch({ type: "status", id: t.transaction_id, status: "Pending approval", actor: "Treasury Analyst (maker)", reason: "Submitted for independent approval" })}>Submit for approval</Btn>}
-                {stageIndex(t.status) === 3 && <Btn variant="primary" onClick={() => dispatch({ type: "status", id: t.transaction_id, status: "Executed (simulated)", actor: "System (simulated)", reason: "Execution simulated — no real money moved" })}>Simulate execution</Btn>}
-                {stageIndex(t.status) === 3 && /sweep/i.test(t.transaction_type) && <Btn variant="danger" onClick={() => dispatch({ type: "failSweep", id: t.transaction_id })}>Simulate sweep failure</Btn>}
-                {stageIndex(t.status) === 4 && <Btn variant="ink" onClick={() => dispatch({ type: "status", id: t.transaction_id, status: "Reconciled (simulated)", actor: "Statement matching (simulated)", reason: "Matched to next-morning statement (simulated)" })}>Reconcile</Btn>}
-                {blocked && <Link to="/risk" className="font-semibold underline">Investigate in Risk & Compliance →</Link>}
+              {blocked && <Link to="/risk" className="font-semibold underline">Investigate in Risk & Compliance →</Link>}
+              <div className="border-t border-border pt-3">
                 <Link to="/policies" className="font-semibold underline">Why? Decision explanation →</Link>
-              </div>}
+              </div>
               <p className="text-muted-foreground">{t.execution_note ?? "Simulated only"} · No live bank, TMS or SWIFT connection.</p>
             </div>
           ) : (
