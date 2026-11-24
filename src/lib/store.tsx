@@ -5,6 +5,7 @@ import {
   seedAudit,
   seedExceptions,
   seedSweeps,
+  cashPositions as seedCashPositions,
   entityById,
   toInr,
   LOCAL_ISLANDS,
@@ -23,6 +24,7 @@ type State = {
   audit: AuditRow[];
   exceptions: Exc[];
   sweeps: Record<string, any>[];
+  cashPositions: Record<string, any>[];
   seq: number;
 };
 
@@ -36,6 +38,7 @@ const initial: State = {
   audit: [...seedAudit].reverse(),
   exceptions: seedExceptions.map((e) => ({ ...e })),
   sweeps: seedSweeps.map((s) => ({ ...s })),
+  cashPositions: seedCashPositions.map((position) => ({ ...position })),
   seq: 1021,
 };
 
@@ -51,6 +54,8 @@ export const LIFECYCLE = [
 export function requiredControls(t: Txn) {
   const inr = toInr(t.amount_native ?? 0, t.currency);
   if (t.is_intercompany_loan_request) return ["Middle Office Review"];
+  if (t.is_intercompany_loan_proposal) return ["Middle Office Review"];
+  if (t.is_investment_proposal) return ["Maker", "Independent checker", "Sanctions screening"];
   if (t.is_sweep_proposal) {
     const roles = ["Middle Office Review"];
     if (inr > FRONT_OFFICE_THRESHOLD_INR) roles.push("Front-office approver");
@@ -81,11 +86,24 @@ type Action =
   | { type: "status"; id: string; status: string; actor: string; reason: string; policy?: string }
   | { type: "approve"; id: string; role: string; actor?: string; decision: "Approved" | "Rejected" }
   | { type: "failSweep"; id: string }
-  | { type: "exception"; id: string; status: string; actor: string; comment?: string };
+  | { type: "exception"; id: string; status: string; actor: string; comment?: string }
+  | {
+      type: "simulatePoolSweeps";
+      transfers: {
+        pool_id: string;
+        source_entity_id: string;
+        source_account_id?: string;
+        destination_entity_id: string;
+        destination_account_id?: string;
+        currency: string;
+        amount_native: number;
+        amount_inr: number;
+      }[];
+    };
 
 function reducer(s: State, a: Action): State {
-  const audit = (obj: string, action: string, actor: string, oldS: string, newS: string, reason: string, policy = "", linkedTransactionId = "") => ({
-    audit_id: `AUD-${9000 + s.audit.length + 1}`,
+  const audit = (obj: string, action: string, actor: string, oldS: string, newS: string, reason: string, policy = "", linkedTransactionId = "", idOffset = 0) => ({
+    audit_id: `AUD-${9000 + s.audit.length + idOffset + 1}`,
     timestamp_demo: now(),
     linked_object_id: obj,
     linked_transaction_id: linkedTransactionId || obj,
@@ -101,16 +119,31 @@ function reducer(s: State, a: Action): State {
     case "create": {
       const isSweepProposal = a.txn.is_sweep_proposal === true;
       const isLoanRequest = a.txn.is_intercompany_loan_request === true;
-      const requiresMiddleOfficeReview = isSweepProposal || isLoanRequest;
-      const status = requiresMiddleOfficeReview ? "Pending Middle Office Review" : "Draft (simulated)";
+      const isLoanProposal = a.txn.is_intercompany_loan_proposal === true;
+      const isInvestmentProposal = a.txn.is_investment_proposal === true;
+      const requiresMiddleOfficeReview = isSweepProposal || isLoanRequest || isLoanProposal;
+      const requiresReview = requiresMiddleOfficeReview || isInvestmentProposal;
+      const status = requiresMiddleOfficeReview
+        ? "Pending Middle Office Review"
+        : isInvestmentProposal
+          ? "Pending approval"
+          : "Draft (simulated)";
       const t: Txn = { ...a.txn, transaction_id: `TRX-${s.seq}`, status, created_timestamp_demo: now() };
-      const approvals = requiresMiddleOfficeReview
+      const approvals = requiresReview
         ? [
             ...requiredControls(t).map((role, i) => ({
               approval_id: `APR-${2100 + s.approvals.length + i}`,
               transaction_id: t.transaction_id,
               approval_type: role,
-              approver_role: role === "Middle Office Review" ? (isLoanRequest ? LOAN_REVIEWER : SWEEP_REVIEWER) : "Front-office approver (independent)",
+              approver_role: role === "Middle Office Review"
+                ? (isLoanRequest || isLoanProposal ? LOAN_REVIEWER : SWEEP_REVIEWER)
+                : role === "Maker"
+                  ? "Treasury Analyst (maker)"
+                  : role === "Independent checker"
+                    ? "Treasury Manager (independent)"
+                    : role === "Sanctions screening"
+                      ? "Screening service (simulated)"
+                      : "Front-office approver (independent)",
               status_demo: "Pending",
               timestamp_demo: "",
               segregation_of_duties_check: "Must differ from initiator",
@@ -124,13 +157,30 @@ function reducer(s: State, a: Action): State {
         seq: s.seq + 1,
         txns: [t, ...s.txns],
         approvals,
-        audit: [audit(t.transaction_id, requiresMiddleOfficeReview ? (isLoanRequest ? "Intercompany loan request submitted for Middle Office review" : "Sweep submitted for Middle Office review") : "Proposal created", t.initiator ?? "Treasury Analyst (maker)", "—", t.status, t.decision_rationale), ...s.audit],
+        audit: [audit(
+          t.transaction_id,
+          isLoanRequest
+            ? "Intercompany loan request submitted for Middle Office review"
+            : isLoanProposal
+              ? "Intercompany loan proposal submitted for Middle Office review"
+              : isSweepProposal
+                ? "Sweep submitted for Middle Office review"
+                : isInvestmentProposal
+                  ? "Investment proposal submitted for approval"
+                  : "Proposal created",
+          t.initiator ?? "Treasury Analyst (maker)",
+          "—",
+          t.status,
+          t.decision_rationale,
+          "",
+          t.transaction_id,
+        ), ...s.audit],
       };
     }
     case "status": {
       const t = s.txns.find((x) => x.transaction_id === a.id)!;
       if (
-        t.is_intercompany_loan_request &&
+        (t.is_intercompany_loan_request || t.is_intercompany_loan_proposal) &&
         /executed/i.test(a.status) &&
         (!/approved/i.test(t.status) || t.credit_capacity_verified !== true)
       ) {
@@ -182,22 +232,22 @@ function reducer(s: State, a: Action): State {
       const assignedPendingApproval = s.approvals.some(
         (x) => x.transaction_id === a.id && x.approval_type === a.role && x.status_demo === "Pending",
       );
-      const authorizedReviewer = t.is_intercompany_loan_request
+      const authorizedReviewer = t.is_intercompany_loan_request || t.is_intercompany_loan_proposal
         ? a.role === "Middle Office Review" ? LOAN_REVIEWER : undefined
         : t.is_sweep_proposal
           ? a.role === "Middle Office Review" ? SWEEP_REVIEWER : a.role === "Front-office approver" ? "Front-office approver (independent)" : undefined
           : undefined;
       const approvalNotAllowed =
-        (t.is_intercompany_loan_request || t.is_sweep_proposal) &&
+        (t.is_intercompany_loan_request || t.is_intercompany_loan_proposal || t.is_sweep_proposal) &&
         (!authorizedReviewer ||
           a.actor !== authorizedReviewer ||
           a.actor === t.initiator ||
           !assignedPendingApproval ||
-          (t.is_intercompany_loan_request && a.decision === "Approved" && t.credit_capacity_verified !== true));
+          ((t.is_intercompany_loan_request || t.is_intercompany_loan_proposal) && a.decision === "Approved" && t.credit_capacity_verified !== true));
       if (approvalNotAllowed) {
         return {
           ...s,
-          audit: [audit(a.id, "Approval attempt blocked", a.actor ?? a.role, t.status, t.status, t.is_intercompany_loan_request ? "Loan approval requires an authorised independent Middle Office reviewer and verified credit-line capacity." : "Sweep approval requires the authorised independent reviewer assigned to this approval step."), ...s.audit],
+          audit: [audit(a.id, "Approval attempt blocked", a.actor ?? a.role, t.status, t.status, t.is_intercompany_loan_request || t.is_intercompany_loan_proposal ? "Loan approval requires an authorised independent Middle Office reviewer and verified credit-line capacity." : "Sweep approval requires the authorised independent reviewer assigned to this approval step."), ...s.audit],
         };
       }
       const approvals = s.approvals.map((x) =>
@@ -273,6 +323,100 @@ function reducer(s: State, a: Action): State {
           ),
           ...s.audit,
         ],
+      };
+    }
+    case "simulatePoolSweeps": {
+      const timestamp = now();
+      const transfers = a.transfers.filter(
+        (transfer) =>
+          transfer.source_entity_id !== transfer.destination_entity_id &&
+          transfer.amount_native > 0 &&
+          transfer.amount_inr > 0,
+      );
+      if (transfers.length === 0) return s;
+
+      const transactions = transfers.map((transfer, index) => {
+        const transactionId = `TRX-${s.seq + index}`;
+        return {
+          transaction_id: transactionId,
+          transaction_type: "Automated pool sweep",
+          is_automated_sweep: true,
+          initiator: "System (simulated)",
+          pool_id: transfer.pool_id,
+          from_entity_id: transfer.source_entity_id,
+          from_account_id: transfer.source_account_id,
+          to_entity_id: transfer.destination_entity_id,
+          to_account_id: transfer.destination_account_id,
+          currency: transfer.currency,
+          amount_native: transfer.amount_native,
+          status: "Executed (simulated)",
+          created_timestamp_demo: timestamp,
+          submitted_timestamp_demo: timestamp,
+          last_state_timestamp_demo: timestamp,
+          decision_rationale: "Automated end-of-day transfer of cash surplus above the configured operating target to the currency pool header.",
+          required_control: "Configured pool membership and currency route",
+          execution_note: "Simulated sweep recorded; no live bank movement or statement reconciliation",
+          policy_ids: "POL-POOL-01",
+        };
+      });
+      const positionDeltas = new Map<string, number>();
+      for (const transfer of transfers) {
+        positionDeltas.set(
+          transfer.source_entity_id,
+          (positionDeltas.get(transfer.source_entity_id) ?? 0) - transfer.amount_inr,
+        );
+        positionDeltas.set(
+          transfer.destination_entity_id,
+          (positionDeltas.get(transfer.destination_entity_id) ?? 0) + transfer.amount_inr,
+        );
+      }
+      const nextPositions = s.cashPositions.map((position) => {
+        const delta = positionDeltas.get(position.entity_id) ?? 0;
+        if (delta === 0) return position;
+        const cash = position.cash_balance_inr_equivalent + delta;
+        const surplus = position.surplus_inr_equivalent + delta;
+        return {
+          ...position,
+          cash_balance_inr_equivalent: cash,
+          cash_balance_inr_equivalent_demo: cash,
+          surplus_inr_equivalent: surplus,
+          surplus_above_target_inr_equivalent_demo: surplus,
+        };
+      });
+      const auditEvents = transactions.map((transaction, index) =>
+        audit(
+          transaction.transaction_id,
+          "Automated end-of-day sweep (simulated)",
+          "System (simulated)",
+          "Surplus above operating target",
+          transaction.status,
+          `${transaction.currency} ${transaction.amount_native} transferred from ${transaction.from_entity_id} to pool header ${transaction.to_entity_id}.`,
+          "POL-POOL-01",
+          transaction.transaction_id,
+          index,
+        ),
+      );
+      const sweepRows = transactions.map((transaction, index) => ({
+        sweep_id: `SWP-${7001 + s.sweeps.length + index}`,
+        transaction_id: transaction.transaction_id,
+        pool_id: transaction.pool_id,
+        source_entity_id: transaction.from_entity_id,
+        destination_entity_id: transaction.to_entity_id,
+        currency: transaction.currency,
+        amount_native: transaction.amount_native,
+        cutoff_timestamp_demo: timestamp,
+        sweep_status_demo: "Success (simulated)",
+        reconciliation_status_demo: "Pending statement reconciliation",
+        exception_reference: "No exception",
+        policy_id: "POL-POOL-01",
+      }));
+      return {
+        ...s,
+        seq: s.seq + transactions.length,
+        txns: [...transactions, ...s.txns],
+        cashPositions: nextPositions,
+        sweeps: [...sweepRows, ...s.sweeps],
+        audit: [...auditEvents, ...s.audit],
       };
     }
   }

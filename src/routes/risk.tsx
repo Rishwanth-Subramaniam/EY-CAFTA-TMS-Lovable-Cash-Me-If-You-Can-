@@ -309,7 +309,7 @@ function Risk() {
 
   return (
     <>
-      <PageHeader n={5} title="Risk & Compliance" sub="Review treasury exceptions, the transaction workflow, and the available event history. All records are illustrative." about="Use this screen to investigate flagged treasury transactions and review recorded changes, responsible actors, statuses, supporting reasons, and next steps. The audit history contains only the prototype's available demo records and current-session events." />
+      <PageHeader n={6} title="Risk & Compliance" sub="Review treasury exceptions, the transaction workflow, and the available event history. All records are illustrative." about="Use this screen to investigate flagged treasury transactions and review recorded changes, responsible actors, statuses, supporting reasons, and next steps. The audit history contains only the prototype's available demo records and current-session events." />
       <div className="grid grid-cols-2 gap-3">
         <Metric accent label="Flagged Transactions" value={open.length} />
         <Metric label="Blocked by policy" value={blocked.length} sub="Count-based" />

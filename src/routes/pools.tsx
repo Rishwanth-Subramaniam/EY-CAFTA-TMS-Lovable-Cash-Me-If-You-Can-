@@ -35,8 +35,10 @@ function Pools() {
   const [filter, setFilter] = useState("ALL");
   const t = state.txns.find((x) => x.transaction_id === tx);
   const loanRequest = Boolean(
-    t && (t.is_intercompany_loan_request === true || /intercompany loan/i.test(t.transaction_type)),
+    t && (t.is_intercompany_loan_request === true || (!t.is_intercompany_loan_proposal && /intercompany loan/i.test(t.transaction_type))),
   );
+  const loanProposal = t?.is_intercompany_loan_proposal === true;
+  const isLoan = loanRequest || loanProposal;
   const txApprovals = state.approvals.filter((a) => a.transaction_id === tx);
   const queue = state.txns.filter((x) => filter === "ALL" || (filter === "OPEN" ? stageIndex(x.status) < 4 && !/blocked|reject|failed/i.test(x.status) : filter === "BLOCKED" ? /blocked|reject|failed/i.test(x.status) : stageIndex(x.status) >= 4));
   const ledger = state.txns.filter(
@@ -48,7 +50,7 @@ function Pools() {
 
   return (
     <>
-      <PageHeader n={3} title="Cash Pools & Transfers" sub="Read-only register of treasury proposals and their current workflow status. Approvals, execution and reconciliation are not performed on this screen." about="Review submitted proposals, their details and status. This screen does not provide controls to approve, reject, validate, execute or reconcile transactions." />
+      <PageHeader n={4} title="Cash Pools & Transfers" sub="Read-only register of treasury proposals and their current workflow status. Approvals, execution and reconciliation are not performed on this screen." about="Review submitted proposals, their details and status. This screen does not provide controls to approve, reject, validate, execute or reconcile transactions." />
 
       <Panel title="Pools and currency groups" note="Primary active headers: EUR at HSBC Netherlands, USD at Citi USA, INR at the existing Indian partner bank. Standby accounts are not pool masters.">
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
@@ -83,10 +85,10 @@ function Pools() {
           </div>
         </Panel>
 
-        <Panel className="min-w-0" title={t ? `${t.transaction_id} · ${t.transaction_type}` : "Select a transaction"} note={t ? `Created ${t.created_timestamp_demo ?? t.created_at_demo}` : "Proposals from Screen 2 open here automatically."}>
+        <Panel className="min-w-0" title={t ? `${t.transaction_id} · ${t.transaction_type}` : "Select a transaction"} note={t ? `Created ${t.created_timestamp_demo ?? t.created_at_demo}` : "Submitted proposals and simulated sweeps appear here."}>
           {t ? (
             <div className="space-y-4 text-xs">
-              {!loanRequest && <ol className="flex flex-wrap gap-1">
+              {!loanRequest && !loanProposal && <ol className="flex flex-wrap gap-1">
                 {LIFECYCLE.map((s, i) => {
                   const done = !blocked && stageIndex(t.status) >= i;
                   const label = (t.is_sweep_proposal || t.is_intercompany_loan_request) && s === "Pending approval"
@@ -98,19 +100,21 @@ function Pools() {
               <div className="grid grid-cols-2 gap-2">
                 <div><div className="eyebrow">Amount</div><div className="num font-semibold">{fmtNative(t.amount_native, t.currency)}</div><div className="num text-muted-foreground">{fmtInr(toInr(t.amount_native, t.currency))} INR equiv.</div></div>
                 <div><div className="eyebrow">Status</div><Status>{t.status}</Status></div>
-                <div><div className="eyebrow">{loanRequest ? "Proposed funding source" : "From"}</div>{entityName(loanRequest ? t.funding_source_entity_id ?? t.from_entity_id : t.from_entity_id)}{(loanRequest ? t.funding_source_account_id ?? t.from_account_id : t.from_account_id) && <div className="text-muted-foreground">{loanRequest ? t.funding_source_account_id ?? t.from_account_id : t.from_account_id}</div>}</div>
-                <div><div className="eyebrow">{loanRequest ? "Borrowing entity" : "To"}</div>{entityName(loanRequest ? t.borrowing_entity_id ?? t.to_entity_id : t.to_entity_id)}{!loanRequest && t.to_account_id && <div className="text-muted-foreground">{t.to_account_id}</div>}</div>
+                <div><div className="eyebrow">{isLoan ? "Proposed funding source" : "From"}</div>{entityName(isLoan ? t.funding_source_entity_id ?? t.from_entity_id : t.from_entity_id)}{(isLoan ? t.funding_source_account_id ?? t.from_account_id : t.from_account_id) && <div className="text-muted-foreground">{isLoan ? t.funding_source_account_id ?? t.from_account_id : t.from_account_id}</div>}</div>
+                <div><div className="eyebrow">{isLoan ? "Borrowing entity" : "To"}</div>{entityName(isLoan ? t.borrowing_entity_id ?? t.to_entity_id : t.to_entity_id)}{t.to_account_id && <div className="text-muted-foreground">{t.to_account_id}</div>}</div>
               </div>
-              {loanRequest && (
+              {isLoan && (
                 <div className="space-y-2 rounded-sm border border-border bg-muted p-2">
-                  <div className="font-semibold">Intercompany loan request · {t.pool_id}</div>
+                  <div className="font-semibold">{loanProposal ? "Intercompany loan proposal" : "Intercompany loan request"} · {t.pool_id}</div>
                   <div>Approved credit-line limit: {t.credit_line_limit_native == null ? "Not recorded" : fmtNative(t.credit_line_limit_native, t.currency)}</div>
                   <div>Outstanding utilisation: {t.outstanding_utilisation_native == null ? "Not recorded" : fmtNative(t.outstanding_utilisation_native, t.currency)}</div>
                   <div>Remaining available credit: {t.available_credit_native == null ? "Cannot calculate — credit-line data missing" : fmtNative(t.available_credit_native, t.currency)}</div>
                   {t.business_purpose && <div>Business purpose: {t.business_purpose}</div>}
                   <div>Credit-line validation: {t.credit_capacity_verified ? "Verified" : "Requires Middle Office evidence."}</div>
                   <div>Submitted by {t.initiator ?? "Originating entity"} · {t.submitted_timestamp_demo ?? t.created_timestamp_demo ?? t.created_at_demo}</div>
-                  <div>Entity-originated request. Middle Office review and bank execution are handled outside this work queue.</div>
+                  {loanRequest
+                    ? <div>Entity-originated request. Middle Office review and bank execution are handled outside this work queue.</div>
+                    : <div>Front Office proposal for independent Middle Office review. Pricing, credit capacity, legal/tax terms, approval, and execution are handled outside this work queue.</div>}
                   {t.funding_confirmed_timestamp_demo && <div>Funding confirmed by execution event: {t.funding_confirmed_timestamp_demo}. {t.credit_utilisation_update_status}</div>}
                 </div>
               )}
@@ -123,7 +127,7 @@ function Pools() {
                 <div className="rounded-sm border border-danger/30 bg-danger-soft p-2 text-xs">
                   <div className="font-semibold text-danger">Next step required</div>
                   <p className="mt-1">{issueSummary}</p>
-                  {!loanRequest && linkedExceptions.length > 0 && (
+                  {!isLoan && linkedExceptions.length > 0 && (
                     <div className="mt-1 text-muted-foreground">Exception: {linkedExceptions[0].exception_id} · {linkedExceptions[0].next_action}</div>
                   )}
                 </div>
@@ -133,12 +137,12 @@ function Pools() {
               <div>
                 <div className="eyebrow mb-1">Required controls</div>
                 <div className="flex flex-wrap gap-1">{requiredControls(t).map((r) => <span key={r} className="rounded-sm border border-border px-1.5 py-0.5">{r}</span>)}</div>
-                {!loanRequest && <p className="mt-1 text-muted-foreground">Front-office approver required above {fmtInr(FRONT_OFFICE_THRESHOLD_INR)} INR equiv. — Configured threshold, illustrative.</p>}
+                {!isLoan && <p className="mt-1 text-muted-foreground">Front-office approver required above {fmtInr(FRONT_OFFICE_THRESHOLD_INR)} INR equiv. — Configured threshold, illustrative.</p>}
               </div>
               {txApprovals.length > 0 && (
                 <>
                   <p className="font-semibold">Approval steps and statuses are shown for reference only. Review decisions are handled outside this screen.</p>
-                  {loanRequest && <p className="font-semibold">View-only request record. Approval and bank execution are not performed in this work queue.</p>}
+                  {(loanRequest || loanProposal) && <p className="font-semibold">View-only loan record. Approval and bank execution are not performed in this work queue.</p>}
                   <table className="data-table">
                     <thead><tr><th>Step</th><th>Role</th><th>Status</th></tr></thead>
                     <tbody>

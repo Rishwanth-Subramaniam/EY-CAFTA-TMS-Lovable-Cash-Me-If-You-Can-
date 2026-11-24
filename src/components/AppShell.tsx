@@ -1,10 +1,11 @@
 import { Link, Outlet } from "@tanstack/react-router";
-import { LayoutDashboard, Wallet, Repeat, Landmark, ShieldCheck, BarChart3, FolderTree, BookOpen, ArrowLeftRight } from "lucide-react";
+import { LayoutDashboard, Wallet, Repeat, Landmark, ShieldCheck, BarChart3, FolderTree, BookOpen, ArrowLeftRight, Layers } from "lucide-react";
 import { DEMO_DATE } from "@/lib/data";
 
 const NAV = [
   { to: "/", label: "Treasury Overview", icon: LayoutDashboard },
   { to: "/cash", label: "Cash Position", icon: Wallet },
+  { to: "/pool-headers", label: "Pool Header Balances", icon: Layers },
   { to: "/pools", label: "Cash Pools & Transfers", icon: Repeat },
   { to: "/banking", label: "Banking & Counterparties", icon: Landmark },
   { to: "/risk", label: "Risk & Compliance", icon: ShieldCheck },
@@ -15,9 +16,9 @@ const NAV = [
 
 const NAV_INDEX = Object.fromEntries(NAV.map((n, index) => [n.to, index + 1]));
 const GROUPS = [
-  { title: "Monitor", items: [NAV[0], NAV[1], NAV[2]] },
-  { title: "Structure", items: [NAV[3], NAV[6]] },
-  { title: "Control", items: [NAV[4], NAV[5], NAV[7]] },
+  { title: "Monitor", items: [NAV[0], NAV[1], NAV[2], NAV[3]] },
+  { title: "Structure", items: [NAV[4], NAV[7]] },
+  { title: "Control", items: [NAV[5], NAV[6], NAV[8]] },
 ] as const;
 
 export function AppShell() {
@@ -52,7 +53,7 @@ export function AppShell() {
           ))}
           <Link to="/banking" hash="fx" className="mt-2 flex items-center gap-3 rounded-md px-3 py-2 text-[0.8rem] text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
             <ArrowLeftRight className="h-4 w-4" /> FX & Markets
-            <span className="ml-auto text-[0.6rem] opacity-70">in 4</span>
+            <span className="ml-auto text-[0.6rem] opacity-70">in 5</span>
           </Link>
         </nav>
         <div className="border-t border-sidebar-border p-4 text-[0.65rem] leading-relaxed text-ink-muted">

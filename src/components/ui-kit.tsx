@@ -5,7 +5,7 @@ export function PageHeader({ n, title, sub, children, about }: { n: number; titl
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
       <div className="min-w-0 flex-1">
-        <div className="eyebrow">Screen {n} of 8</div>
+        <div className="eyebrow">Screen {n} of 9</div>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
         <p className="mt-1 max-w-4xl text-sm text-muted-foreground">{sub}</p>
         {about && (

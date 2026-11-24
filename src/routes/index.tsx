@@ -35,7 +35,7 @@ function Overview() {
         <Metric accent label="Group cash (INR equiv.)" value={fmtInr(groupCash)} sub={groupCash === CANON.groupCash ? "Reconciles to case total" : "Check vs case total"} />
         <Metric label="Group borrowings (INR equiv.)" value={fmtInr(groupDebt)} sub="Gross external debt" />
         <Metric accent label="Same-currency cash/debt overlap" value={fmtInr(headlineOverlap)} sub={<>Target {fmtInr(CANON.overlapMonth7)} by Month 7 · gross basis, islands excluded</>} />
-        <Metric label="Committed external credit lines" value={fmtInr(CANON.committedLines)} sub="Kept ready · see Screen 4" />
+        <Metric label="Committed external credit lines" value={fmtInr(CANON.committedLines)} sub="Kept ready · see Screen 5" />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
